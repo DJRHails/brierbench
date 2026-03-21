@@ -15,7 +15,6 @@ from __future__ import annotations
 import json
 import os
 from datetime import date, timedelta
-from typing import ClassVar
 
 from exa_py import Exa
 from pydantic import BaseModel, Field
@@ -23,8 +22,8 @@ from pydantic import BaseModel, Field
 from openreward import AsyncOpenReward, SandboxSettings
 from openreward.environments import (
     Environment,
+    JSONObject,
     Server,
-    Split,
     TextBlock,
     ToolOutput,
     tool,
@@ -126,14 +125,12 @@ class SubmitPredictionParams(BaseModel):
 class BrierBench(Environment):
     """Forecasting environment with time-weighted Brier scoring."""
 
-    toolsets: ClassVar[list] = []
-
     def __init__(
         self,
-        task_spec: dict = {},
+        task_spec: JSONObject = {},
         secrets: dict[str, str] = {},
     ) -> None:
-        super().__init__(task_spec, secrets=secrets)
+        super().__init__(task_spec)
 
         # Parse task
         self.task_id: str = task_spec["id"]
@@ -187,14 +184,11 @@ class BrierBench(Environment):
     # -- Class methods -------------------------------------------------------
 
     @classmethod
-    def list_splits(cls) -> list[Split]:
-        return [
-            Split(name="train", type="train"),
-            Split(name="test", type="test"),
-        ]
+    def list_splits(cls) -> list[str]:
+        return ["train", "test"]
 
     @classmethod
-    def list_tasks(cls, split: str) -> list[dict]:
+    def list_tasks(cls, split: str) -> list[JSONObject]:
         return _get_tasks(split)
 
     def get_prompt(self) -> list[TextBlock]:
@@ -469,4 +463,5 @@ class BrierBench(Environment):
 # Server
 # ---------------------------------------------------------------------------
 
-Server([BrierBench]).run()
+if __name__ == "__main__":
+    Server([BrierBench]).run()
