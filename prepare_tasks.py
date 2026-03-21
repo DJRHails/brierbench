@@ -216,13 +216,13 @@ def main() -> None:
 
     logger.info(f"Total tasks: {len(all_tasks)}")
 
-    # Sort deterministically
-    all_tasks.sort(key=lambda t: t["id"])
+    # Sort by start_date so test split contains the most recent questions
+    all_tasks.sort(key=lambda t: (t["start_date"], t["id"]))
 
-    # Split into train/test
+    # Split: earliest questions are train, most recent are test
     n_test = max(1, int(len(all_tasks) * args.test_fraction))
-    test_tasks = all_tasks[:n_test]
-    train_tasks = all_tasks[n_test:]
+    train_tasks = all_tasks[: len(all_tasks) - n_test]
+    test_tasks = all_tasks[len(all_tasks) - n_test :]
 
     # Write output
     train_path = output_dir / "train.json"
