@@ -79,10 +79,13 @@ def upload_forecast_skill(session) -> None:
             continue
         files[script.name] = script.read_text()
 
-    parts = ["mkdir -p /forecast-skill"]
+    parts = ["mkdir -p /forecast-skill/scripts"]
     for name, content in files.items():
+        dest = f"/forecast-skill/scripts/{name}"
+        if name == "SKILL.md":
+            dest = f"/forecast-skill/{name}"
         parts.append(
-            f"cat <<'FORECAST_SKILL_EOF' > /forecast-skill/{name}\n"
+            f"cat <<'FORECAST_SKILL_EOF' > {dest}\n"
             f"{content}\n"
             f"FORECAST_SKILL_EOF"
         )
@@ -101,10 +104,13 @@ async def async_upload_forecast_skill(session) -> None:
             continue
         files[script.name] = script.read_text()
 
-    parts = ["mkdir -p /forecast-skill"]
+    parts = ["mkdir -p /forecast-skill/scripts"]
     for name, content in files.items():
+        dest = f"/forecast-skill/scripts/{name}"
+        if name == "SKILL.md":
+            dest = f"/forecast-skill/{name}"
         parts.append(
-            f"cat <<'FORECAST_SKILL_EOF' > /forecast-skill/{name}\n"
+            f"cat <<'FORECAST_SKILL_EOF' > {dest}\n"
             f"{content}\n"
             f"FORECAST_SKILL_EOF"
         )
@@ -146,10 +152,9 @@ def run_agent_loop(
 
     input_list: list = []
     if system_message:
-        input_list.append({
-            "role": "developer",
-            "content": system_message,
-        })
+        sys_msg = {"role": "developer", "content": system_message}
+        input_list.append(sys_msg)
+        rollout.log_openai_response(sys_msg)
     input_list.append({"role": "user", "content": user_message})
     rollout.log_openai_response(input_list[-1])
 
@@ -282,10 +287,9 @@ async def async_run_agent_loop(
 
     input_list: list = []
     if system_message:
-        input_list.append({
-            "role": "developer",
-            "content": system_message,
-        })
+        sys_msg = {"role": "developer", "content": system_message}
+        input_list.append(sys_msg)
+        rollout.log_openai_response(sys_msg)
     input_list.append({"role": "user", "content": user_message})
     rollout.log_openai_response(input_list[-1])
 

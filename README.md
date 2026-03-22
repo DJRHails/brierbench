@@ -52,14 +52,16 @@ Multi-turn. Task horizons range from days to months. The agent chooses how many 
 
 ## Secrets
 
-- `EXA_API_KEY` for web search (not a well-known secret; pass as a tuple):
-  ```python
-  secrets = {
-      "EXA_API_KEY": (exa_key, ["api.exa.ai"]),
-      "OPENREWARD_API_KEY": openreward_key,
-  }
-  ```
-- `OPENREWARD_API_KEY` for sandbox provisioning
+- `EXA_API_KEY` for web search (not a well-known secret; pass as a tuple with allowed domains)
+- `OPENROUTER_API_KEY` powers the LLM date-filter grader inside `web_search` (also passed with allowed domains)
+- `OPENREWARD_API_KEY` for sandbox provisioning (well-known; set as env var)
+
+```python
+secrets = {
+    "EXA_API_KEY": (exa_key, ["api.exa.ai"]),
+    "OPENROUTER_API_KEY": (openrouter_key, ["openrouter.ai"]),
+}
+```
 
 ## Contamination caveats
 
@@ -84,7 +86,7 @@ For the strictest evaluation, use models whose training cutoff falls before the 
 If you use BrierBench, please cite:
 
 ```bibtex
-@misc{hails2025brierbench,
+@misc{hails2026brierbench,
   author = {Daniel Hails},
   title  = {BrierBench: An OpenReward Environment for LLM Forecasting},
   year   = {2026},

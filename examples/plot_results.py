@@ -22,20 +22,17 @@ from collections import defaultdict
 from datetime import date
 from pathlib import Path
 
+import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
 import numpy as np
 
 sys.path.insert(0, "/Users/dh/.claude/skills/graph-design")
-from graph_design import colors, finalize, label_lines, set_theme
+from graph_design import colors, finalize, set_theme
+from graph_design._palette import C_LABEL
+
+from lab.models.cutoffs import get_knowledge_cutoff_str
 
 _DATE_PREFIX = re.compile(r"^(\d{4}-\d{2}-\d{2})_")
-
-MODEL_CUTOFFS = {
-    "google/gemini-3-flash-preview": "2025-01-01",
-    "google/gemini-2.5-flash": "2025-01-01",
-    "deepseek/deepseek-v3.2": "2025-02-01",
-    "x-ai/grok-4": "2025-04-01",
-}
 
 
 def _extract_date(task_id: str) -> str | None:
@@ -85,10 +82,6 @@ def _plot_panel(ax, runs: list[dict], palette: list, cutoff: str | None) -> None
     """Plot runs onto a single axes panel."""
     for i, run in enumerate(runs):
         c = palette[i % len(palette)]
-        label = (
-            f"{run['strategy']} "
-            f"(brier={run['overall_mean']:.3f}, n={run['n_scored']})"
-        )
 
         ax.scatter(
             run["scatter_dates"],
@@ -112,7 +105,6 @@ def _plot_panel(ax, runs: list[dict], palette: list, cutoff: str | None) -> None
             run["mean_brier"],
             color=c,
             linewidth=2,
-            label=label,
             zorder=4,
         )
 
@@ -155,57 +147,101 @@ def main() -> None:
 
     runs = [_load_run(p) for p in args.files]
 
-    # Group by model
-    by_model: dict[str, list[dict]] = defaultdict(list)
+    # Group by strategy (one panel per prediction strategy)
+    by_strategy: dict[str, list[dict]] = defaultdict(list)
     for run in runs:
-        by_model[run["model"]].append(run)
+        by_strategy[run["strategy"]].append(run)
 
-    models = sorted(by_model.keys())
-    n_models = len(models)
+    strategies = sorted(by_strategy.keys())
+    n_panels = len(strategies)
     palette = list(colors)
 
     set_theme()
 
-    if n_models == 1:
+    if n_panels == 1:
         fig, axes = plt.subplots(1, 1, figsize=(7, 5))
         axes = [axes]
-        fig.subplots_adjust(top=0.68, bottom=0.14, left=0.08, right=0.62)
+        fig.subplots_adjust(top=0.74, bottom=0.16, left=0.08, right=0.92)
     else:
         fig, axes = plt.subplots(
-            n_models, 1,
-            figsize=(7, 4 * n_models),
+            n_panels, 1,
+            figsize=(7, 4 * n_panels),
             sharex=True,
         )
         fig.subplots_adjust(
-            top=1 - 0.12 / n_models,
+            top=0.78,
             bottom=0.08,
             left=0.08,
-            right=0.62,
-            hspace=0.25,
+            right=0.92,
+            hspace=0.35,
         )
 
-    for ax, model in zip(axes, models):
-        model_runs = by_model[model]
-        cutoff = args.cutoff or MODEL_CUTOFFS.get(model)
-        _plot_panel(ax, model_runs, palette, cutoff)
-        label_lines(ax, x_offset=8)
+    for panel_idx, (ax, strategy) in enumerate(zip(axes, strategies)):
+        strategy_runs = by_strategy[strategy]
+        # Use first run's model for cutoff lookup
+        model = strategy_runs[0]["model"]
+        cutoff = args.cutoff or get_knowledge_cutoff_str(model)
+        panel_palette = palette[panel_idx:] + palette[:panel_idx]
+        _plot_panel(ax, strategy_runs, panel_palette, cutoff)
 
-        short_model = model.split("/")[-1] if "/" in model else model
-        cutoff_str = f" (cutoff {cutoff})" if cutoff else ""
-        ax.set_title(
-            f"{short_model}{cutoff_str}",
-            fontsize=10, loc="left", pad=8,
-        )
+        # Build panel title with stats
+        stats_parts = []
+        for run in strategy_runs:
+            stats_parts.append(
+                f"brier={run['overall_mean']:.3f}, n={run['n_scored']}"
+            )
+        title_strategy = strategy.replace("_", " ").capitalize()
+        panel_title = f"{title_strategy} ({', '.join(stats_parts)})"
+
+        if n_panels > 1:
+            from graph_design import panel_label
+            panel_label(ax, panel_title)
         ax.set_ylabel("Brier score")
+        ax.xaxis.set_major_locator(mdates.MonthLocator(interval=3))
+        ax.xaxis.set_major_formatter(mdates.DateFormatter("%b '%y"))
 
+    # Build descriptor
+    all_models = sorted({r["model"] for r in runs})
+    short_models = [
+        m.split("/")[-1] if "/" in m else m for m in all_models
+    ]
+    model_str = ", ".join(short_models)
+    cutoff_strs = []
+    for m in all_models:
+        c = args.cutoff or get_knowledge_cutoff_str(m)
+        if c:
+            cutoff_strs.append(c)
+    cutoff_note = (
+        f", cutoff {'/ '.join(cutoff_strs)}" if cutoff_strs else ""
+    )
+
+    source_text = "Source: BrierBench evaluation via OpenReward"
     finalize(
         axes[0],
         title="LLM forecasting accuracy by question date",
-        descriptor="BrierBench, Brier score (lower is better), "
-        "by question set date",
-        source="Source: BrierBench evaluation via OpenReward",
-        y_start=0.075 if n_models > 1 else 0.0,
+        descriptor=(
+            f"{model_str}{cutoff_note}\n"
+            "BrierBench, Brier score (lower is better), "
+            "by question set date"
+        ),
+        source="" if n_panels > 1 else source_text,
+        y_start=0.12 if n_panels > 1 else 0.06,
     )
+    if n_panels > 1:
+        # Place source below the bottom panel manually
+        fig = axes[-1].get_figure()
+        fig.canvas.draw()
+        bbox = axes[-1].get_position()
+        fig.text(
+            bbox.x0,
+            bbox.y0 - 0.06,
+            source_text,
+            transform=fig.transFigure,
+            fontsize=7.5,
+            color=C_LABEL,
+            va="top",
+            ha="left",
+        )
 
     if args.output:
         out = Path(args.output)
