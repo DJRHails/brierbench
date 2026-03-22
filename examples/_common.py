@@ -99,7 +99,7 @@ def run_agent_loop(
 
     # Create rollout for logging
     if rollout_name is None:
-        rollout_name = f"{run_name}-{human_id()}"
+        rollout_name = f"{run_name}:{human_id()}"
     rollout = or_client.rollout.create(
         run_name=run_name,
         rollout_name=rollout_name,
