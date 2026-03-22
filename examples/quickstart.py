@@ -74,6 +74,15 @@ def upload_forecast_skill(session) -> None:
     print(f"Uploaded SKILL.md + {n} scripts to /forecast-skill/")
 
 
+def build_system_message() -> str:
+    """System message pointing the agent at the forecast-skill docs."""
+    return (
+        "Forecast distribution scripts are available at "
+        "/forecast-skill/. Read /forecast-skill/SKILL.md "
+        "with `bash` for usage docs and examples."
+    )
+
+
 example_task = tasks[0]
 with environment.session(task=example_task, secrets=secrets) as session:
     # Setup: upload scripts (invisible to the model)
@@ -82,14 +91,7 @@ with environment.session(task=example_task, secrets=secrets) as session:
     # Build conversation — point the agent at the docs file
     prompt = session.get_prompt()
     input_list = [
-        {
-            "role": "system",
-            "content": (
-                "Forecast distribution scripts are available at "
-                "/forecast-skill/. Read /forecast-skill/SKILL.md "
-                "with `bash` for usage docs and examples."
-            ),
-        },
+        {"role": "system", "content": build_system_message()},
         {"role": "user", "content": prompt[0].text},
     ]
     finished = False
