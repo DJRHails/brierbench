@@ -2,7 +2,7 @@
 
 Agents receive a binary forecasting question and must predict the probability
 of resolution.  They can search the web (date-restricted via Exa), run
-Python/Bash in a network-isolated sandbox, advance simulated time, and
+bash commands in a network-isolated sandbox, advance simulated time, and
 submit/update their prediction at any point.
 
 Scoring uses a *time-weighted* Brier score: later predictions carry more
@@ -80,15 +80,12 @@ class BashParams(BaseModel):
     """Parameters for bash command execution."""
 
     command: str = Field(
-        ..., description="Bash command to execute in the sandbox."
-    )
-
-
-class PythonParams(BaseModel):
-    """Parameters for Python code execution."""
-
-    code: str = Field(
-        ..., description="Python code to execute in the sandbox."
+        ...,
+        description=(
+            "Bash command to execute in the network-isolated sandbox. "
+            "Use this for shell commands, running Python scripts "
+            "(e.g. python3 -c '...'), or any other computation."
+        ),
     )
 
 
@@ -223,10 +220,9 @@ class BrierBench(Environment):
             "- `exa_search`: Search the web for information "
             "(results restricted to content published on or before "
             "the current simulated date).",
-            "- `python`: Execute Python code in a sandboxed environment "
-            "(no network access).",
             "- `bash`: Execute a bash command in a sandboxed environment "
-            "(no network access).",
+            "(no network access). Use for computation, running Python "
+            "scripts, data analysis, etc.",
             "- `advance_time`: Advance the simulated date by N days. "
             "New information becomes available via exa_search after "
             "advancing.",
@@ -339,33 +335,12 @@ class BrierBench(Environment):
             return ToolOutput(
                 blocks=[TextBlock(
                     type="text",
-                    text="Error: sandbox not available (OPENREWARD_API_KEY not set).",
+                    text="Error: sandbox not available "
+                    "(OPENREWARD_API_KEY not set).",
                 )],
             )
         try:
             output = await self._sandbox.check_run(params.command)
-            text = str(output) if output else "(no output)"
-        except Exception as e:
-            text = f"Error: {e}"
-
-        return ToolOutput(
-            blocks=[TextBlock(type="text", text=text)],
-        )
-
-    @tool
-    async def python(self, params: PythonParams) -> ToolOutput:
-        """Execute Python code in the network-isolated sandbox."""
-        if self._sandbox is None:
-            return ToolOutput(
-                blocks=[TextBlock(
-                    type="text",
-                    text="Error: sandbox not available (OPENREWARD_API_KEY not set).",
-                )],
-            )
-        escaped_code = params.code.replace("'", "'\\''")
-        command = f"python3 -c '{escaped_code}'"
-        try:
-            output = await self._sandbox.check_run(command)
             text = str(output) if output else "(no output)"
         except Exception as e:
             text = f"Error: {e}"
