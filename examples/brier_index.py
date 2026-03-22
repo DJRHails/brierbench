@@ -81,14 +81,31 @@ def _load_published_models(
 
 
 def _compute_brier_index(
+    *,
     briers_and_fes: list[tuple[float, float]],
+    all_fes: dict[tuple[str, str], float],
 ) -> dict:
-    """Compute Brier Index from (brier, fixed_effect) pairs."""
+    """Compute difficulty-adjusted Brier Index.
+
+    Following ForecastBench methodology (Kucinskas et al.):
+    1. b_adj = brier - γ_j (subtract question fixed effect)
+    2. b̄_0_adj = mean(0.25 - γ_j) for all questions (naive baseline)
+    3. b_rescaled = b_adj + (0.25 - b̄_0_adj)
+    4. Brier Index = (1 - mean(b_rescaled)) * 100
+    """
     if not briers_and_fes:
         return {"n": 0}
     briers = np.array([b for b, _ in briers_and_fes])
     fes = np.array([fe for _, fe in briers_and_fes])
-    adjusted = briers - fes
+
+    # Naive baseline: always-0.5 forecaster adjusted scores
+    all_fe_values = np.array(list(all_fes.values()))
+    naive_adj_mean = np.mean(0.25 - all_fe_values)
+
+    # Rescale so naive forecaster gets exactly 0.25
+    rescale_offset = 0.25 - naive_adj_mean
+    adjusted = (briers - fes) + rescale_offset
+
     return {
         "n": len(briers),
         "mean_brier": float(np.mean(briers)),
@@ -100,6 +117,7 @@ def _compute_brier_index(
 
 
 def _score_our_run(
+    *,
     path: Path,
     fe: dict[tuple[str, str], float],
 ) -> dict:
@@ -126,7 +144,7 @@ def _score_our_run(
         else:
             n_missing_fe += 1
 
-    stats = _compute_brier_index(pairs)
+    stats = _compute_brier_index(briers_and_fes=pairs, all_fes=fe)
     stats["strategy"] = strategy
     stats["model"] = model
     stats["n_missing_fe"] = n_missing_fe
@@ -137,6 +155,7 @@ def _score_our_run(
 
 
 def _score_published_model(
+    *,
     model_name: str,
     forecasts: list[dict],
     fe: dict[tuple[str, str], float],
@@ -151,7 +170,7 @@ def _score_published_model(
         if key in fe:
             pairs.append((brier, fe[key]))
 
-    stats = _compute_brier_index(pairs)
+    stats = _compute_brier_index(briers_and_fes=pairs, all_fes=fe)
     stats["model"] = model_name
     return stats
 
@@ -178,7 +197,7 @@ def main() -> None:
     # Score our runs
     our_results = []
     for path in args.files:
-        stats = _score_our_run(path, fe)
+        stats = _score_our_run(path=path, fe=fe)
         our_results.append(stats)
 
     # Score published models
@@ -188,7 +207,9 @@ def main() -> None:
         models = _load_published_models(args.forecast_dir)
         print(f"  {len(models)} models loaded\n")
         for model_name, forecasts in models.items():
-            stats = _score_published_model(model_name, forecasts, fe)
+            stats = _score_published_model(
+                    model_name=model_name, forecasts=forecasts, fe=fe
+                )
             if stats["n"] > 0:
                 published[model_name] = stats
 
