@@ -83,8 +83,9 @@ class BashParams(BaseModel):
         ...,
         description=(
             "Bash command to execute in the network-isolated sandbox. "
-            "Use this for shell commands, running Python scripts "
-            "(e.g. python3 -c '...'), or any other computation."
+            "python3, uv, numpy, pandas, scipy, scikit-learn, "
+            "matplotlib, sympy, statsmodels, and beautifulsoup4 "
+            "are pre-installed. Use uv pip install for anything else."
         ),
     )
 
@@ -167,7 +168,7 @@ class BrierBench(Environment):
             or_client = AsyncOpenReward(api_key=or_api_key)
             settings = SandboxSettings(
                 environment="DJRHails/brierbench",
-                image="python:3.11-slim",
+                image="djrhails/brierbench-sandbox:latest",
                 machine_size="0.5:0.5",
                 block_network=True,
             )
