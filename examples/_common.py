@@ -79,17 +79,17 @@ def upload_forecast_skill(session) -> None:
             continue
         files[script.name] = script.read_text()
 
-    parts = ["mkdir -p /forecast-skill/scripts"]
+    session.call_tool("bash", {"command": "mkdir -p /forecast-skill/scripts"})
     for name, content in files.items():
         dest = f"/forecast-skill/scripts/{name}"
         if name == "SKILL.md":
             dest = f"/forecast-skill/{name}"
-        parts.append(
+        cmd = (
             f"cat <<'FORECAST_SKILL_EOF' > {dest}\n"
             f"{content}\n"
             f"FORECAST_SKILL_EOF"
         )
-    session.call_tool("bash", {"command": " && ".join(parts)})
+        session.call_tool("bash", {"command": cmd})
     print(f"Uploaded {len(files)} files to /forecast-skill/")
 
 
@@ -104,17 +104,17 @@ async def async_upload_forecast_skill(session) -> None:
             continue
         files[script.name] = script.read_text()
 
-    parts = ["mkdir -p /forecast-skill/scripts"]
+    await session.call_tool("bash", {"command": "mkdir -p /forecast-skill/scripts"})
     for name, content in files.items():
         dest = f"/forecast-skill/scripts/{name}"
         if name == "SKILL.md":
             dest = f"/forecast-skill/{name}"
-        parts.append(
+        cmd = (
             f"cat <<'FORECAST_SKILL_EOF' > {dest}\n"
             f"{content}\n"
             f"FORECAST_SKILL_EOF"
         )
-    await session.call_tool("bash", {"command": " && ".join(parts)})
+        await session.call_tool("bash", {"command": cmd})
 
 
 _NUDGE = (
