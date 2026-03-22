@@ -4,83 +4,80 @@
 
 ## Description
 
-BrierBench evaluates LLM forecasting accuracy on real-world binary questions from prediction markets and data sources. Agents receive a question, search the web for information, advance through simulated time, and submit probability predictions scored with a time-weighted Brier score.
+BrierBench tests how well LLMs forecast real-world events. An agent receives a binary question from a prediction market or data source, searches the web for evidence, steps forward through simulated time, and submits probability estimates. Scores use a time-weighted Brier score: later predictions count more than earlier ones.
 
-Questions are sourced from [ForecastBench](https://www.forecastbench.org/) (Karger et al., 2025), covering Manifold, Metaculus, Polymarket, INFER, ACLED, FRED, Yahoo Finance, Wikipedia, and DBnomics.
+Questions come from [ForecastBench](https://www.forecastbench.org/) (Karger et al., 2025) and span Manifold, Metaculus, Polymarket, INFER, ACLED, FRED, Yahoo Finance, Wikipedia, and DBnomics.
 
-## Capabilities
+## What it tests
 
-- Calibrated probability estimation on real-world events
-- Information gathering and synthesis via web search
-- Temporal reasoning (updating beliefs as new information arrives)
-- Research planning under time constraints
+- Calibrated probability estimation on real events
+- Evidence gathering and synthesis via web search
+- Temporal reasoning — updating beliefs as new information arrives
+- Research planning under time pressure
 
-## Compute Requirements
+## Compute
 
-Sandbox with network isolation (`block_network=True`) for Python/bash execution. No GPU required.
+Network-isolated sandbox (`block_network=True`) for Python and bash. No GPU.
 
 ## Tasks
 
-- **Train:** 6,671 tasks (Jul 2024 -- Dec 2025)
-- **Test:** 1,667 tasks (Dec 2025 -- Mar 2026)
+- **Train:** 6,671 tasks (Jul 2024 – Dec 2025)
+- **Test:** 1,667 tasks (Dec 2025 – Mar 2026)
 
-Each task provides a question, background, resolution criteria, start date, and resolution date. The agent does not see the outcome.
+Each task gives the agent a question, background, resolution criteria, start date, and resolution date. The outcome is hidden.
 
-## Reward Structure
+## Scoring
 
-**Note:** ORS requires rewards where higher = better. The Brier score is
-the opposite (lower = better), so the reward is flipped:
-`reward = 1 - time_weighted_brier_score`. To recover the raw Brier score:
-`brier = 1 - reward`.
+ORS requires higher = better, but Brier scores are lower = better. The reward is flipped: `reward = 1 - time_weighted_brier_score`. To recover the raw score: `brier = 1 - reward`.
 
-- Predictions are weighted by `t/T` where `t` = days elapsed, `T` = total horizon
-- Later predictions carry more weight, incentivising refinement over time
+- Weight at time `t` is `t/T`, where `T` is the total horizon
+- Later predictions carry more weight, rewarding refinement
 - Unchanged predictions carry over between updates
-- No prediction submitted = worst score (reward 0, brier 1)
-- Continuous reward in [0, 1] (brier in [0, 1])
+- No prediction submitted → worst score (reward 0, Brier 1)
+- Reward is continuous in [0, 1]
 
 ## Tools
 
 | Tool | Description |
 |------|-------------|
-| `web_search` | Web search via Exa API, restricted to content published on or before the current simulated date |
-| `bash` | Execute a bash command in a network-isolated sandbox (python3, uv, numpy, pandas, scipy, etc. pre-installed) |
-| `advance_time` | Advance the simulated date by N days (1--365) |
-| `submit_prediction` | Submit or update probability estimate (0--1 exclusive) |
+| `web_search` | Search via Exa API; results filtered to content published on or before the simulated date |
+| `bash` | Run a command in a network-isolated sandbox (python3, uv, numpy, pandas, scipy, etc. pre-installed) |
+| `advance_time` | Move the simulated date forward by N days (1–365) |
+| `submit_prediction` | Submit or update a probability estimate (0–1 exclusive) |
 | `get_status` | Check current date, prediction, and time remaining |
 
-## Time Horizon
+## Time horizon
 
-Multi-turn. Typical task horizons range from days to months. Agents choose how many time steps to take and when to update predictions.
+Multi-turn. Task horizons range from days to months. The agent chooses how many time steps to take and when to update.
 
-## Other Environment Requirements
+## Secrets
 
-- `EXA_API_KEY` secret for web search (not a well-known secret, pass as tuple):
+- `EXA_API_KEY` for web search (not a well-known secret; pass as a tuple):
   ```python
   secrets = {
       "EXA_API_KEY": (exa_key, ["api.exa.ai"]),
       "OPENREWARD_API_KEY": openreward_key,
   }
   ```
-- `OPENREWARD_API_KEY` secret for sandbox provisioning
+- `OPENREWARD_API_KEY` for sandbox provisioning
 
-## Contamination Caveats
+## Contamination caveats
 
 > **This benchmark does not guarantee a contamination-free evaluation.**
 
-Two sources of information leakage can inflate scores:
+Two sources of leakage can inflate scores:
 
-1. **LLM training cutoffs.** Models trained after question resolution dates may have seen outcomes in their pre-training data. A model with a January 2025 cutoff already "knows" the answer to questions resolving in 2024, regardless of what `web_search` returns. There is no way to enforce a knowledge cutoff within the environment — this is an inherent limitation of evaluating forecasting with post-hoc models. Results should always be reported alongside the model's training cutoff date.
+1. **Training cutoffs.** A model trained after a question's resolution date may already know the answer. A model with a January 2025 cutoff "knows" outcomes for questions that resolved in 2024, regardless of search results. There is no way to enforce a knowledge cutoff within the environment. Always report results alongside the model's training cutoff date.
 
-2. **Exa date filtering is imperfect.** The `end_published_date` parameter filters by *publication date metadata*, which is not always accurate. Pages may be backdated, updated after initial publication without changing the date, or lack publication dates entirely (in which case Exa may fall back to crawl date). As a mitigation, `web_search` applies a secondary LLM pass (Gemini 2.0 Flash Lite) that checks each result for references to events after the simulated date and filters them out. This reduces but does not eliminate leakage — treat search results as best-effort, not as a strict information boundary.
+2. **Search date filtering is imperfect.** Exa's `end_published_date` filters on publication-date metadata, which is not always accurate. Pages may be backdated, updated silently, or lack dates entirely. As a second line of defence, `web_search` runs each result through a cheap LLM (Gemini 2.0 Flash Lite) to check for references to events after the simulated date, and drops those that fail. The two-stage filter reduces but does not eliminate leakage; treat search results as best-effort.
 
-For the most rigorous evaluation, use models with training cutoffs *before* the task start dates, and treat Exa results as supplementary rather than authoritative.
+For the strictest evaluation, use models whose training cutoff falls before the task start dates.
 
 ## Safety
 
 - Sandbox has no network access (`block_network=True`)
 - Web search is date-restricted (best-effort; see caveats above)
-- No dual-use risks; domain is probability estimation on public events
+- No dual-use concerns; the domain is probability estimation on public events
 
 ## Citations
 
