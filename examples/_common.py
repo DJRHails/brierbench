@@ -83,19 +83,25 @@ def run_agent_loop(
     system_message: str | None = None,
     user_message: str | None = None,
 ) -> dict:
-    """Run the OpenRouter agent loop until finished or no tool calls.
+    """Run the agent loop using OpenAI Responses API format.
+
+    When the model stops calling tools, auto-advances to resolution
+    via advance_time so a reward is always produced.
 
     Returns dict with 'reward', 'finished', 'messages', 'n_tool_calls'.
     """
-    tools = environment.list_tools(format="openrouter")
+    tools = environment.list_tools(format="openai")
 
     if user_message is None:
         prompt = session.get_prompt()
         user_message = prompt[0].text
 
-    input_list: list[dict] = []
+    input_list: list = []
     if system_message:
-        input_list.append({"role": "system", "content": system_message})
+        input_list.append({
+            "role": "developer",
+            "content": system_message,
+        })
     input_list.append({"role": "user", "content": user_message})
 
     finished = False
@@ -103,64 +109,69 @@ def run_agent_loop(
     n_tool_calls = 0
 
     while not finished:
-        response = oai_client.chat.completions.create(
+        response = oai_client.responses.create(
             model=MODEL_NAME,
             tools=tools,
-            messages=input_list,
+            input=input_list,
         )
 
-        assistant_message = {
-            "role": "assistant",
-            "content": response.choices[0].message.content,
-            "tool_calls": response.choices[0].message.tool_calls,
-        }
-        input_list.append(assistant_message)
+        input_list += response.output
 
-        tool_calls = response.choices[0].message.tool_calls
-        if not tool_calls:
+        for item in response.output:
+            if item.type == "function_call":
+                n_tool_calls += 1
+                print(f"[{item.name}] {str(item.arguments)[:120]}")
+
+                try:
+                    tool_result = session.call_tool(
+                        item.name,
+                        json.loads(str(item.arguments)),
+                    )
+                except Exception as e:
+                    error_text = f"Tool error: {e}"
+                    print(f"  -> {error_text[:200]}")
+                    input_list.append({
+                        "type": "function_call_output",
+                        "call_id": item.call_id,
+                        "output": json.dumps({"error": error_text}),
+                    })
+                    continue
+
+                result_text = tool_result.blocks[0].text
+                print(f"  -> {result_text[:200]}")
+
+                reward = tool_result.reward
+                finished = tool_result.finished
+
+                if reward is not None:
+                    print(f"  reward={reward:.4f} finished={finished}")
+
+                input_list.append({
+                    "type": "function_call_output",
+                    "call_id": item.call_id,
+                    "output": json.dumps({"result": result_text}),
+                })
+
+                if finished:
+                    break
+
+        # No function calls in this response — model is done
+        if not any(
+            getattr(item, "type", None) == "function_call"
+            for item in response.output
+        ):
             break
 
-        for tool_call in tool_calls:
-            tool_name = tool_call.function.name
-            tool_args = json.loads(tool_call.function.arguments)
-            n_tool_calls += 1
-
-            print(f"[{tool_name}] {json.dumps(tool_args)[:120]}")
-
-            try:
-                tool_result = session.call_tool(tool_name, tool_args)
-            except Exception as e:
-                error_text = f"Tool error: {e}"
-                print(f"  -> {error_text[:200]}")
-                input_list.append({
-                    "role": "tool",
-                    "tool_call_id": tool_call.id,
-                    "content": json.dumps({"error": error_text}),
-                })
-                continue
-
-            result_text = tool_result.blocks[0].text
-            print(f"  -> {result_text[:200]}")
-
-            if tool_result.reward is not None:
-                reward = tool_result.reward
-                print(f"  reward={reward:.4f} finished={tool_result.finished}")
-
-            finished = tool_result.finished
-
-            input_list.append({
-                "role": "tool",
-                "tool_call_id": tool_call.id,
-                "content": json.dumps({"result": result_text}),
-            })
-
-            if finished:
-                break
-
-    # Print final text if the model gave one
-    last = input_list[-1]
-    if last.get("role") == "assistant" and last.get("content"):
-        print(f"\n[assistant] {last['content'][:500]}")
+    # If model stopped without finishing, force advance to resolution
+    if not finished:
+        print("\n[auto] Model stopped — advancing to resolution...")
+        result = session.call_tool("advance_time", {"days": 365})
+        text = result.blocks[0].text
+        print(f"  -> {text[:200]}")
+        reward = result.reward
+        finished = result.finished
+        if reward is not None:
+            print(f"  reward={reward:.4f} finished={finished}")
 
     return {
         "reward": reward,
