@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 
 from dotenv import load_dotenv
+from humane import short_human_id
 from openai import OpenAI
 from openreward import OpenReward
 
@@ -97,6 +98,8 @@ def run_agent_loop(
         user_message = prompt[0].text
 
     # Create rollout for logging
+    if rollout_name is None:
+        rollout_name = short_human_id()
     rollout = or_client.rollout.create(
         run_name=run_name,
         rollout_name=rollout_name,
