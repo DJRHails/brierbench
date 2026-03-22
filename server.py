@@ -182,8 +182,9 @@ class BrierBench(Environment):
                 api_key=grader_key,
             )
 
-        # Sandbox client (requires OPENREWARD_API_KEY for remote sandboxes)
+        # Sandbox client — started lazily on first bash call
         self._sandbox = None
+        self._sandbox_started = False
         or_api_key = secrets.get("OPENREWARD_API_KEY", "")
         if or_api_key:
             or_client = AsyncOpenReward(api_key=or_api_key)
@@ -196,15 +197,22 @@ class BrierBench(Environment):
             self._sandbox = or_client.sandbox(settings)
 
     async def setup(self) -> None:
-        """Start sandbox and initialise Exa client."""
+        """Initialise Exa client. Sandbox starts lazily on first bash call."""
         if self._exa_api_key:
             self._exa = Exa(api_key=self._exa_api_key)
-        if self._sandbox is not None:
+
+    async def _ensure_sandbox(self) -> bool:
+        """Start sandbox on first use. Returns True if available."""
+        if self._sandbox is None:
+            return False
+        if not self._sandbox_started:
             await self._sandbox.start()
+            self._sandbox_started = True
+        return True
 
     async def teardown(self) -> None:
-        """Stop sandbox."""
-        if self._sandbox is not None:
+        """Stop sandbox if it was started."""
+        if self._sandbox is not None and self._sandbox_started:
             await self._sandbox.stop()
 
     # -- Class methods -------------------------------------------------------
@@ -414,7 +422,7 @@ class BrierBench(Environment):
     @tool
     async def bash(self, params: BashParams) -> ToolOutput:
         """Execute a bash command in the network-isolated sandbox."""
-        if self._sandbox is None:
+        if not await self._ensure_sandbox():
             return ToolOutput(
                 blocks=[TextBlock(
                     type="text",
