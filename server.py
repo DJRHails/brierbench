@@ -13,13 +13,17 @@ prediction is unchanged between updates it carries over at each timestep.
 from __future__ import annotations
 
 import json
+import logging
 import os
 from datetime import date, timedelta
 
 from exa_py import Exa
+from openai import AsyncOpenAI
 from pydantic import BaseModel, Field
 
 from openreward import AsyncOpenReward, SandboxSettings
+
+logger = logging.getLogger(__name__)
 from openreward.environments import (
     Environment,
     JSONObject,
@@ -73,6 +77,14 @@ class ExaSearchParams(BaseModel):
     )
     num_results: int = Field(
         5, description="Number of results to return (1-10).", ge=1, le=10
+    )
+    start_date: str | None = Field(
+        None,
+        description=(
+            "Optional start date (YYYY-MM-DD) for results. "
+            "Only results published on or after this date are returned. "
+            "Useful for narrowing to recent news, e.g. the last 7 days."
+        ),
     )
 
 
@@ -160,6 +172,15 @@ class BrierBench(Environment):
         # Exa client (initialised in setup)
         self._exa: Exa | None = None
         self._exa_api_key = secrets.get("EXA_API_KEY", "")
+
+        # Cheap grader model for date-filtering search results
+        self._grader: AsyncOpenAI | None = None
+        grader_key = secrets.get("OPENROUTER_API_KEY", "")
+        if grader_key:
+            self._grader = AsyncOpenAI(
+                base_url="https://openrouter.ai/api/v1",
+                api_key=grader_key,
+            )
 
         # Sandbox client (requires OPENREWARD_API_KEY for remote sandboxes)
         self._sandbox = None
@@ -278,6 +299,46 @@ class BrierBench(Environment):
 
     # -- Tools ---------------------------------------------------------------
 
+    async def _check_future_leakage(
+        self,
+        title: str,
+        text_snippet: str,
+        cutoff: str,
+    ) -> bool:
+        """Use a cheap model to check if a result contains future info.
+
+        Returns True if the result should be FILTERED OUT.
+        """
+        if self._grader is None:
+            return False
+
+        prompt = (
+            f"The current simulated date is {cutoff}. "
+            f"Does this search result clearly describe events or "
+            f"contain information from AFTER {cutoff}? "
+            f"Answer only YES or NO.\n\n"
+            f"Title: {title}\n"
+            f"Snippet: {text_snippet[:500]}"
+        )
+        try:
+            response = await self._grader.chat.completions.create(
+                model="google/gemini-2.0-flash-lite-001",
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=3,
+            )
+            answer = (response.choices[0].message.content or "").strip()
+            is_future = answer.upper().startswith("YES")
+            if is_future:
+                logger.warning(
+                    "Filtered future-leaking result: %s (cutoff=%s)",
+                    title[:80],
+                    cutoff,
+                )
+            return is_future
+        except Exception as e:
+            logger.warning("Date filter grader failed: %s", e)
+            return False
+
     @tool
     async def exa_search(self, params: ExaSearchParams) -> ToolOutput:
         """Search the web via Exa, restricted to the current simulated date."""
@@ -291,14 +352,21 @@ class BrierBench(Environment):
                 ],
             )
 
+        cutoff = self.current_date.isoformat()
         end_date = (self.current_date + timedelta(days=1)).isoformat()
+
+        exa_kwargs: dict = {
+            "num_results": params.num_results,
+            "end_published_date": end_date,
+            "type": "auto",
+            "text": {"max_characters": 3000},
+        }
+        if params.start_date:
+            exa_kwargs["start_published_date"] = params.start_date
+
         try:
             response = self._exa.search_and_contents(
-                params.query,
-                num_results=params.num_results,
-                end_published_date=end_date,
-                type="auto",
-                text={"max_characters": 3000},
+                params.query, **exa_kwargs
             )
         except Exception as e:
             return ToolOutput(
@@ -309,6 +377,15 @@ class BrierBench(Environment):
 
         results = []
         for r in response.results:
+            # LLM-based date filter for results with bad metadata
+            is_future = await self._check_future_leakage(
+                title=r.title or "",
+                text_snippet=r.text or "",
+                cutoff=cutoff,
+            )
+            if is_future:
+                continue
+
             entry = f"### {r.title}\n**URL:** {r.url}\n"
             if r.published_date:
                 entry += f"**Published:** {r.published_date}\n"
@@ -321,7 +398,7 @@ class BrierBench(Environment):
         else:
             text = (
                 f"Found {len(results)} results "
-                f"(published on or before {self.current_date.isoformat()}):"
+                f"(published on or before {cutoff}):"
                 f"\n\n{'---'.join(results)}"
             )
 
