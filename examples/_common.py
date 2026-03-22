@@ -155,23 +155,20 @@ def run_agent_loop(
                 if finished:
                     break
 
-        # No function calls in this response — model is done
+        # No function calls — re-prompt the model to keep going
         if not any(
             getattr(item, "type", None) == "function_call"
             for item in response.output
         ):
-            break
-
-    # If model stopped without finishing, force advance to resolution
-    if not finished:
-        print("\n[auto] Model stopped — advancing to resolution...")
-        result = session.call_tool("advance_time", {"days": 365})
-        text = result.blocks[0].text
-        print(f"  -> {text[:200]}")
-        reward = result.reward
-        finished = result.finished
-        if reward is not None:
-            print(f"  reward={reward:.4f} finished={finished}")
+            input_list.append({
+                "role": "user",
+                "content": (
+                    "You must call `advance_time` to advance to the "
+                    "resolution date. Submit a prediction first with "
+                    "`submit_prediction` if you haven't already, then "
+                    "call `advance_time` to finish the episode."
+                ),
+            })
 
     return {
         "reward": reward,
