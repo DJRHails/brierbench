@@ -53,7 +53,13 @@ Multi-turn. Typical task horizons range from days to months. Agents choose how m
 
 ## Other Environment Requirements
 
-- `EXA_API_KEY` secret for web search
+- `EXA_API_KEY` secret for web search (not a well-known secret, pass as tuple):
+  ```python
+  secrets = {
+      "EXA_API_KEY": (exa_key, ["api.exa.ai"]),
+      "OPENREWARD_API_KEY": openreward_key,
+  }
+  ```
 - `OPENREWARD_API_KEY` secret for sandbox provisioning
 
 ## Safety
