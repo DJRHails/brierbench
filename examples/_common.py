@@ -120,6 +120,9 @@ def run_agent_loop(
     finished = False
     reward = None
     n_tool_calls = 0
+    last_call_key: str | None = None
+    repeat_count = 0
+    max_repeats = 3
 
     while not finished:
         response = oai_client.responses.create(
@@ -134,7 +137,44 @@ def run_agent_loop(
         for item in response.output:
             if item.type == "function_call":
                 n_tool_calls += 1
+                call_key = f"{item.name}:{item.arguments}"
                 print(f"[{item.name}] {str(item.arguments)[:120]}")
+
+                # Detect repeated identical tool calls
+                if call_key == last_call_key:
+                    repeat_count += 1
+                    if repeat_count >= max_repeats:
+                        print(
+                            f"  -> Repeated call {repeat_count}x, "
+                            f"forcing advance to resolution"
+                        )
+                        result = session.call_tool(
+                            "advance_time", {"days": 365}
+                        )
+                        text = result.blocks[0].text
+                        print(f"  -> {text[:200]}")
+                        reward = result.reward
+                        finished = result.finished
+                        if reward is not None:
+                            print(
+                                f"  reward={reward:.4f} "
+                                f"finished={finished}"
+                            )
+                        tool_result_item = {
+                            "type": "function_call_output",
+                            "call_id": item.call_id,
+                            "output": json.dumps({"result": text}),
+                        }
+                        input_list.append(tool_result_item)
+                        rollout.log_openai_response(
+                            tool_result_item,
+                            reward=reward,
+                            is_finished=finished,
+                        )
+                        break
+                else:
+                    repeat_count = 0
+                last_call_key = call_key
 
                 try:
                     tool_result = session.call_tool(
