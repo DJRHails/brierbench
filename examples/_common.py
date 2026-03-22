@@ -70,7 +70,6 @@ def upload_forecast_skill(session) -> None:
             continue
         files[script.name] = script.read_text()
 
-    # Batch all files into a single bash command
     parts = ["mkdir -p /forecast-skill"]
     for name, content in files.items():
         parts.append(
@@ -80,6 +79,14 @@ def upload_forecast_skill(session) -> None:
         )
     session.call_tool("bash", {"command": " && ".join(parts)})
     print(f"Uploaded {len(files)} files to /forecast-skill/")
+
+
+_NUDGE = (
+    "You must call `advance_time` to advance to the "
+    "resolution date. Submit a prediction first with "
+    "`submit_prediction` if you haven't already, then "
+    "call `advance_time` to finish the episode."
+)
 
 
 def run_agent_loop(
@@ -98,8 +105,7 @@ def run_agent_loop(
     tools = environment.list_tools(format="openai")
 
     if user_message is None:
-        prompt = session.get_prompt()
-        user_message = prompt[0].text
+        user_message = session.get_prompt()[0].text
 
     if rollout_name is None:
         rollout_name = f"{run_name}:{human_id()}"
@@ -125,6 +131,20 @@ def run_agent_loop(
     n_tool_calls = 0
     last_call_key: str | None = None
     repeat_count = 0
+
+    def _record(tool_out: dict, tool_result) -> None:
+        nonlocal reward, finished
+        input_list.append(tool_out)
+        rollout.log_openai_response(
+            tool_out,
+            reward=tool_result.reward,
+            is_finished=tool_result.finished,
+        )
+        reward = tool_result.reward
+        finished = tool_result.finished
+        print(f"  -> {tool_result.blocks[0].text[:200]}")
+        if reward is not None:
+            print(f"  reward={reward:.4f} finished={finished}")
 
     while not finished:
         response = oai_client.responses.create(
@@ -152,27 +172,16 @@ def run_agent_loop(
             last_call_key = call_key
 
             if repeat_count >= _MAX_REPEATS:
-                print(
-                    f"  -> Repeated {repeat_count}x, "
-                    f"forcing advance to resolution"
-                )
+                print(f"  -> Repeated {repeat_count}x, forcing advance")
                 result = session.call_tool(
                     "advance_time", {"days": 365}
                 )
-                tool_out = _make_tool_output(
-                    item.call_id, result=result.blocks[0].text
+                _record(
+                    _make_tool_output(
+                        item.call_id, result=result.blocks[0].text
+                    ),
+                    result,
                 )
-                input_list.append(tool_out)
-                rollout.log_openai_response(
-                    tool_out,
-                    reward=result.reward,
-                    is_finished=result.finished,
-                )
-                reward = result.reward
-                finished = result.finished
-                print(f"  -> {result.blocks[0].text[:200]}")
-                if reward is not None:
-                    print(f"  reward={reward:.4f} finished={finished}")
                 break
 
             try:
@@ -190,38 +199,17 @@ def run_agent_loop(
                 rollout.log_openai_response(tool_out)
                 continue
 
-            result_text = tool_result.blocks[0].text
-            print(f"  -> {result_text[:200]}")
-
-            reward = tool_result.reward
-            finished = tool_result.finished
-
-            if reward is not None:
-                print(f"  reward={reward:.4f} finished={finished}")
-
-            tool_out = _make_tool_output(
-                item.call_id, result=result_text
+            _record(
+                _make_tool_output(
+                    item.call_id, result=tool_result.blocks[0].text
+                ),
+                tool_result,
             )
-            input_list.append(tool_out)
-            rollout.log_openai_response(
-                tool_out,
-                reward=reward,
-                is_finished=finished,
-            )
-
             if finished:
                 break
 
         if not had_function_call:
-            nudge = {
-                "role": "user",
-                "content": (
-                    "You must call `advance_time` to advance to the "
-                    "resolution date. Submit a prediction first with "
-                    "`submit_prediction` if you haven't already, then "
-                    "call `advance_time` to finish the episode."
-                ),
-            }
+            nudge = {"role": "user", "content": _NUDGE}
             input_list.append(nudge)
             rollout.log_openai_response(nudge)
 
