@@ -280,7 +280,12 @@ class BrierBench(Environment):
         return self.predictions[-1][1]
 
     def _compute_reward(self) -> float:
-        """Reward = 1 - time_weighted_brier.  Higher is better."""
+        """Reward = 1 - time_weighted_brier_score (higher is better).
+
+        ORS requires reward where higher = better. Brier score is the
+        opposite (lower = better), so we flip it. To recover the raw
+        time-weighted Brier score: brier = 1 - reward.
+        """
         bs = time_weighted_brier(
             self.predictions, self.outcome, self.total_days
         )

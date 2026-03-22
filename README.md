@@ -28,13 +28,16 @@ Each task provides a question, background, resolution criteria, start date, and 
 
 ## Reward Structure
 
-Time-weighted Brier score: `reward = 1 - weighted_brier`.
+**Note:** ORS requires rewards where higher = better. The Brier score is
+the opposite (lower = better), so the reward is flipped:
+`reward = 1 - time_weighted_brier_score`. To recover the raw Brier score:
+`brier = 1 - reward`.
 
 - Predictions are weighted by `t/T` where `t` = days elapsed, `T` = total horizon
 - Later predictions carry more weight, incentivising refinement over time
 - Unchanged predictions carry over between updates
-- No prediction submitted = worst score (reward 0)
-- Continuous reward in [0, 1]
+- No prediction submitted = worst score (reward 0, brier 1)
+- Continuous reward in [0, 1] (brier in [0, 1])
 
 ## Tools
 
