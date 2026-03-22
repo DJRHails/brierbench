@@ -80,23 +80,24 @@ def build_zero_shot_prompt(task_spec: dict) -> str:
     )
 
 
-tasks = environment.get_task_range(split="train", start=0, stop=1)
-task = tasks[0]
-spec = task.task_spec
+if __name__ == "__main__":
+    tasks = environment.get_task_range(split="train", start=0, stop=1)
+    task = tasks[0]
+    spec = task.task_spec
 
-print(f"Question: {spec['question'][:120]}...")
-print(f"Source: {spec['source']}")
-print(f"Dates: {spec['start_date']} -> {spec['resolution_date']}")
-print(f"Outcome: {'YES' if spec['outcome'] == 1.0 else 'NO'}\n")
+    print(f"Question: {spec['question'][:120]}...")
+    print(f"Source: {spec['source']}")
+    print(f"Dates: {spec['start_date']} -> {spec['resolution_date']}")
+    print(f"Outcome: {'YES' if spec['outcome'] == 1.0 else 'NO'}\n")
 
-with environment.session(task=task, secrets=get_secrets()) as session:
-    result = run_agent_loop(
-        session,
-        run_name="brierbench-zero-shot",
-        rollout_name=spec["id"],
-        user_message=build_zero_shot_prompt(spec),
-    )
+    with environment.session(task=task, secrets=get_secrets()) as session:
+        result = run_agent_loop(
+            session,
+            run_name="brierbench-zero-shot",
+            rollout_name=spec["id"],
+            user_message=build_zero_shot_prompt(spec),
+        )
 
-print(f"\nReward: {result['reward']}")
-print(f"Tool calls: {result['n_tool_calls']}")
-print(f"Messages: {len(result['messages'])}")
+    print(f"\nReward: {result['reward']}")
+    print(f"Tool calls: {result['n_tool_calls']}")
+    print(f"Messages: {len(result['messages'])}")
