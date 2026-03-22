@@ -81,11 +81,24 @@ For the most rigorous evaluation, use models with training cutoffs *before* the 
 
 ## Citations
 
+If you use BrierBench, please cite:
+
 ```bibtex
-@article{karger2025forecastbench,
-  author  = {Karger, Ezra and others},
-  title   = {ForecastBench: A Dynamic Benchmark of AI Forecasting Capabilities},
-  year    = {2025},
-  journal = {arXiv preprint},
+@misc{hails2025brierbench,
+  author = {Daniel Hails},
+  title  = {BrierBench: An OpenReward Environment for LLM Forecasting},
+  year   = {2026},
+  url    = {https://openreward.ai/DJRHails/brierbench},
+}
+```
+
+BrierBench builds on questions from ForecastBench:
+
+```bibtex
+@inproceedings{karger2025forecastbench,
+  title     = {ForecastBench: A Dynamic Benchmark of AI Forecasting Capabilities},
+  author    = {Ezra Karger and Houtan Bastani and Chen Yueh-Han and Zachary Jacobs and Danny Halawi and Fred Zhang and Philip E. Tetlock},
+  booktitle = {International Conference on Learning Representations (ICLR)},
+  year      = {2025},
 }
 ```

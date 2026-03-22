@@ -12,7 +12,8 @@ from openreward import OpenReward
 
 load_dotenv()
 
-FORECAST_SKILL_DIR = Path("forecast-skill")
+_REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+FORECAST_SKILL_DIR = _REPO_ROOT / "forecast-skill"
 MODEL_NAME = os.environ.get("MODEL_NAME", "google/gemini-3-flash-preview")
 
 or_client = OpenReward()
@@ -33,6 +34,12 @@ def get_secrets() -> dict:
     exa_key = os.environ.get("EXA_API_KEY")
     if exa_key:
         secrets["EXA_API_KEY"] = (exa_key, ["api.exa.ai"])
+    openrouter_key = os.environ.get("OPENROUTER_API_KEY")
+    if openrouter_key:
+        secrets["OPENROUTER_API_KEY"] = (
+            openrouter_key,
+            ["openrouter.ai"],
+        )
     return secrets
 
 
@@ -120,7 +127,18 @@ def run_agent_loop(
 
             print(f"[{tool_name}] {json.dumps(tool_args)[:120]}")
 
-            tool_result = session.call_tool(tool_name, tool_args)
+            try:
+                tool_result = session.call_tool(tool_name, tool_args)
+            except Exception as e:
+                error_text = f"Tool error: {e}"
+                print(f"  -> {error_text[:200]}")
+                input_list.append({
+                    "role": "tool",
+                    "tool_call_id": tool_call.id,
+                    "content": json.dumps({"error": error_text}),
+                })
+                continue
+
             result_text = tool_result.blocks[0].text
             print(f"  -> {result_text[:200]}")
 
