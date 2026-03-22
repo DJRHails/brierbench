@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import json
 import subprocess
+from datetime import date
 from pathlib import Path
 
 from loguru import logger
@@ -119,6 +120,15 @@ def build_tasks(
             if not res_date_raw:
                 continue
             res_date = res_date_raw.split("T")[0]
+
+        # Skip invalid or missing resolution dates
+        if not res_date or res_date == "N/A":
+            continue
+        try:
+            _validate = date.fromisoformat(res_date)
+            _validate = date.fromisoformat(start_date)
+        except ValueError:
+            continue
 
         # Skip if resolution date is before or same as start
         if res_date <= start_date:

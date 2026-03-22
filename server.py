@@ -103,6 +103,10 @@ class AdvanceTimeParams(BaseModel):
     )
 
 
+class GetStatusParams(BaseModel):
+    """No parameters required."""
+
+
 class SubmitPredictionParams(BaseModel):
     """Parameters for submitting or updating a prediction."""
 
@@ -159,27 +163,30 @@ class BrierBench(Environment):
         self._exa: Exa | None = None
         self._exa_api_key = secrets.get("EXA_API_KEY", "")
 
-        # Sandbox client
-        self._or_client = AsyncOpenReward(
-            api_key=secrets.get("OPENREWARD_API_KEY", ""),
-        )
-        self._sandbox_settings = SandboxSettings(
-            environment="DJRHails/brierbench",
-            image="python:3.11-slim",
-            machine="0.5:0.5",
-            block_network=True,
-        )
-        self._sandbox = self._or_client.sandbox(self._sandbox_settings)
+        # Sandbox client (requires OPENREWARD_API_KEY for remote sandboxes)
+        self._sandbox = None
+        or_api_key = secrets.get("OPENREWARD_API_KEY", "")
+        if or_api_key:
+            or_client = AsyncOpenReward(api_key=or_api_key)
+            settings = SandboxSettings(
+                environment="DJRHails/brierbench",
+                image="python:3.11-slim",
+                machine_size="0.5:0.5",
+                block_network=True,
+            )
+            self._sandbox = or_client.sandbox(settings)
 
     async def setup(self) -> None:
         """Start sandbox and initialise Exa client."""
         if self._exa_api_key:
             self._exa = Exa(api_key=self._exa_api_key)
-        await self._sandbox.start()
+        if self._sandbox is not None:
+            await self._sandbox.start()
 
     async def teardown(self) -> None:
         """Stop sandbox."""
-        await self._sandbox.stop()
+        if self._sandbox is not None:
+            await self._sandbox.stop()
 
     # -- Class methods -------------------------------------------------------
 
@@ -328,6 +335,13 @@ class BrierBench(Environment):
     @tool
     async def bash(self, params: BashParams) -> ToolOutput:
         """Execute a bash command in the network-isolated sandbox."""
+        if self._sandbox is None:
+            return ToolOutput(
+                blocks=[TextBlock(
+                    type="text",
+                    text="Error: sandbox not available (OPENREWARD_API_KEY not set).",
+                )],
+            )
         try:
             output = await self._sandbox.check_run(params.command)
             text = str(output) if output else "(no output)"
@@ -341,6 +355,13 @@ class BrierBench(Environment):
     @tool
     async def python(self, params: PythonParams) -> ToolOutput:
         """Execute Python code in the network-isolated sandbox."""
+        if self._sandbox is None:
+            return ToolOutput(
+                blocks=[TextBlock(
+                    type="text",
+                    text="Error: sandbox not available (OPENREWARD_API_KEY not set).",
+                )],
+            )
         escaped_code = params.code.replace("'", "'\\''")
         command = f"python3 -c '{escaped_code}'"
         try:
@@ -450,7 +471,7 @@ class BrierBench(Environment):
         )
 
     @tool
-    async def get_status(self, params: dict = {}) -> ToolOutput:
+    async def get_status(self, params: GetStatusParams) -> ToolOutput:
         """Get current status: date, prediction, time remaining."""
         return ToolOutput(
             blocks=[
