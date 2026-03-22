@@ -17,7 +17,8 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 FORECAST_SKILL_DIR = _REPO_ROOT / "forecast-skill"
 MODEL_NAME = os.environ.get("MODEL_NAME", "google/gemini-3-flash-preview")
 _MAX_REPEATS = 3
-_BRIERBENCH_URL = os.environ.get("BRIERBENCH_URL", "http://localhost:8081")
+_BRIERBENCH_URL = os.environ.get("BRIERBENCH_URL") or None
+_BRIERBENCH_ENV = os.environ.get("BRIERBENCH_ENV", "DJRHails/brierbench")
 
 # Sync clients (for single-task examples)
 or_client = OpenReward()
@@ -26,7 +27,7 @@ oai_client = OpenAI(
     api_key=os.environ["OPENROUTER_API_KEY"],
 )
 environment = or_client.environments.get(
-    name="brierbench",
+    name=_BRIERBENCH_ENV,
     base_url=_BRIERBENCH_URL,
 )
 
@@ -261,7 +262,7 @@ async def async_run_agent_loop(
 ) -> dict:
     """Async agent loop for batch evaluation."""
     async_env = async_or_client.environments.get(
-        name="brierbench",
+        name=_BRIERBENCH_ENV,
         base_url=_BRIERBENCH_URL,
     )
     tools = await async_env.list_tools(format="openai")

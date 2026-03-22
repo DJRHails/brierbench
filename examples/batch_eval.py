@@ -20,6 +20,7 @@ from pathlib import Path
 
 from _common import (
     MODEL_NAME,
+    _BRIERBENCH_ENV,
     _BRIERBENCH_URL,
     async_or_client,
     async_run_agent_loop,
@@ -43,7 +44,7 @@ async def _run_task(
     secrets = get_secrets()
 
     env = async_or_client.environments.get(
-        name="brierbench",
+        name=_BRIERBENCH_ENV,
         base_url=_BRIERBENCH_URL,
     )
 
@@ -144,7 +145,7 @@ async def main() -> None:
     args = parser.parse_args()
 
     env = async_or_client.environments.get(
-        name="brierbench",
+        name=_BRIERBENCH_ENV,
         base_url=_BRIERBENCH_URL,
     )
     all_tasks = await env.list_tasks(split=args.split)
