@@ -152,7 +152,7 @@ async def main() -> None:
     rng = random.Random(args.seed)
     tasks = rng.sample(all_tasks, min(args.n_samples, len(all_tasks)))
 
-    run_name = f"brierbench-{args.strategy}-{args.n_samples}"
+    run_name = f"brierbench:{args.strategy}-{args.n_samples}"
     print(f"Strategy: {args.strategy}")
     print(f"Model: {MODEL_NAME}")
     print(f"Tasks: {len(tasks)} (from {len(all_tasks)} in {args.split})")
