@@ -80,13 +80,13 @@ def upload_forecast_skill(session) -> None:
 def run_agent_loop(
     session,
     *,
+    run_name: str = "brierbench-smoke",
+    rollout_name: str | None = None,
+    split: str = "train",
     system_message: str | None = None,
     user_message: str | None = None,
 ) -> dict:
-    """Run the agent loop using OpenAI Responses API format.
-
-    When the model stops calling tools, auto-advances to resolution
-    via advance_time so a reward is always produced.
+    """Run the agent loop using OpenAI Responses API with rollout logging.
 
     Returns dict with 'reward', 'finished', 'messages', 'n_tool_calls'.
     """
@@ -96,6 +96,15 @@ def run_agent_loop(
         prompt = session.get_prompt()
         user_message = prompt[0].text
 
+    # Create rollout for logging
+    rollout = or_client.rollout.create(
+        run_name=run_name,
+        rollout_name=rollout_name,
+        environment="DJRHails/brierbench",
+        split=split,
+        print_messages=True,
+    )
+
     input_list: list = []
     if system_message:
         input_list.append({
@@ -103,6 +112,7 @@ def run_agent_loop(
             "content": system_message,
         })
     input_list.append({"role": "user", "content": user_message})
+    rollout.log_openai_response(input_list[-1])
 
     finished = False
     reward = None
@@ -114,6 +124,7 @@ def run_agent_loop(
             tools=tools,
             input=input_list,
         )
+        rollout.log_openai_response(response)
 
         input_list += response.output
 
@@ -130,11 +141,13 @@ def run_agent_loop(
                 except Exception as e:
                     error_text = f"Tool error: {e}"
                     print(f"  -> {error_text[:200]}")
-                    input_list.append({
+                    tool_result_item = {
                         "type": "function_call_output",
                         "call_id": item.call_id,
                         "output": json.dumps({"error": error_text}),
-                    })
+                    }
+                    input_list.append(tool_result_item)
+                    rollout.log_openai_response(tool_result_item)
                     continue
 
                 result_text = tool_result.blocks[0].text
@@ -146,11 +159,17 @@ def run_agent_loop(
                 if reward is not None:
                     print(f"  reward={reward:.4f} finished={finished}")
 
-                input_list.append({
+                tool_result_item = {
                     "type": "function_call_output",
                     "call_id": item.call_id,
                     "output": json.dumps({"result": result_text}),
-                })
+                }
+                input_list.append(tool_result_item)
+                rollout.log_openai_response(
+                    tool_result_item,
+                    reward=reward,
+                    is_finished=finished,
+                )
 
                 if finished:
                     break
@@ -160,7 +179,7 @@ def run_agent_loop(
             getattr(item, "type", None) == "function_call"
             for item in response.output
         ):
-            input_list.append({
+            nudge = {
                 "role": "user",
                 "content": (
                     "You must call `advance_time` to advance to the "
@@ -168,7 +187,11 @@ def run_agent_loop(
                     "`submit_prediction` if you haven't already, then "
                     "call `advance_time` to finish the episode."
                 ),
-            })
+            }
+            input_list.append(nudge)
+            rollout.log_openai_response(nudge)
+
+    or_client.rollout.close()
 
     return {
         "reward": reward,

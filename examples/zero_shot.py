@@ -92,6 +92,8 @@ print(f"Outcome: {'YES' if spec['outcome'] == 1.0 else 'NO'}\n")
 with environment.session(task=task, secrets=get_secrets()) as session:
     result = run_agent_loop(
         session,
+        run_name="brierbench-zero-shot",
+        rollout_name=spec["id"],
         user_message=build_zero_shot_prompt(spec),
     )
 
