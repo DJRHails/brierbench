@@ -260,7 +260,11 @@ async def async_run_agent_loop(
     quiet: bool = False,
 ) -> dict:
     """Async agent loop for batch evaluation."""
-    tools = environment.list_tools(format="openai")
+    async_env = async_or_client.environments.get(
+        name="brierbench",
+        base_url=_BRIERBENCH_URL,
+    )
+    tools = await async_env.list_tools(format="openai")
 
     if user_message is None:
         user_message = (await session.get_prompt())[0].text
