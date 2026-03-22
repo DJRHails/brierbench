@@ -368,8 +368,6 @@ async def async_run_agent_loop(
             input_list.append(nudge)
             rollout.log_openai_response(nudge)
 
-    async_or_client.rollout.close()
-
     return {
         "reward": reward,
         "finished": finished,

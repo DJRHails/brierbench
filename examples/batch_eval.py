@@ -199,6 +199,8 @@ async def main() -> None:
         }, indent=2))
         print(f"Results written to {out_path}")
 
+    async_or_client.rollout.close()
+
 
 if __name__ == "__main__":
     asyncio.run(main())
