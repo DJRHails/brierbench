@@ -75,13 +75,13 @@ def _run_batch(
     run_name: str,
     concurrency: int,
 ) -> list[dict]:
-    """Run tasks with thread-based concurrency."""
-    from concurrent.futures import ThreadPoolExecutor, as_completed
+    """Run tasks with process-based concurrency."""
+    from concurrent.futures import ProcessPoolExecutor, as_completed
 
     results = []
     t0 = time.time()
 
-    with ThreadPoolExecutor(max_workers=concurrency) as pool:
+    with ProcessPoolExecutor(max_workers=concurrency) as pool:
         futures = {
             pool.submit(_run_task, strategy, task, run_name): task
             for task in tasks
