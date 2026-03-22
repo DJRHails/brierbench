@@ -34,8 +34,12 @@ Today's Date: {today_date}
 
 Question resolution date: {resolution_date}
 
-You have access to tools. Use `submit_prediction` to submit your \
-probability estimate. You MUST call submit_prediction with your answer.
+Do NOT use exa_search, bash, or any other tool. Do NOT search for \
+information. Respond using only your existing knowledge.
+
+Immediately call `submit_prediction` with your probability, then call \
+`advance_time` with days=365 to finish. Do not output any other text \
+or reasoning before calling the tools.
 """
 
 ZERO_SHOT_DATASET = """\
@@ -60,8 +64,12 @@ Today's Date: {today_date}
 
 Question resolution date: {resolution_date}
 
-You have access to tools. Use `submit_prediction` to submit your \
-probability estimate. You MUST call submit_prediction with your answer.
+Do NOT use exa_search, bash, or any other tool. Do NOT search for \
+information. Respond using only your existing knowledge.
+
+Immediately call `submit_prediction` with your probability, then call \
+`advance_time` with days=365 to finish. Do not output any other text \
+or reasoning before calling the tools.
 """
 
 
