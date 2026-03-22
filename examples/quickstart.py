@@ -42,15 +42,25 @@ secrets = {
 
 
 def upload_forecast_skill(session) -> None:
-    """Upload forecast-skill scripts into the sandbox via bash."""
-    scripts_dir = FORECAST_SKILL_DIR / "scripts"
+    """Upload forecast-skill scripts and docs into the sandbox via bash."""
     session.call_tool("bash", {"command": "mkdir -p /forecast-skill"})
 
+    # Upload SKILL.md (docs the agent can read via bash)
+    skill_md = (FORECAST_SKILL_DIR / "SKILL.md").read_text()
+    session.call_tool("bash", {
+        "command": (
+            "cat <<'FORECAST_SKILL_EOF' > /forecast-skill/SKILL.md\n"
+            f"{skill_md}\n"
+            "FORECAST_SKILL_EOF"
+        ),
+    })
+
+    # Upload scripts
+    scripts_dir = FORECAST_SKILL_DIR / "scripts"
     for script in sorted(scripts_dir.glob("*.py")):
         if script.name.startswith("__"):
             continue
         content = script.read_text()
-        # Use heredoc to write file contents into sandbox
         session.call_tool("bash", {
             "command": (
                 f"cat <<'FORECAST_SKILL_EOF' > "
@@ -60,24 +70,8 @@ def upload_forecast_skill(session) -> None:
             ),
         })
 
-    print(f"Uploaded {len(list(scripts_dir.glob('*.py')))} scripts")
-
-
-def build_system_message() -> str:
-    """Build system message with forecast-skill docs."""
-    skill_md = (FORECAST_SKILL_DIR / "SKILL.md").read_text()
-    # Strip YAML frontmatter
-    parts = skill_md.split("---", 2)
-    if len(parts) >= 3:
-        skill_md = parts[2].strip()
-
-    return (
-        "You have access to forecast distribution scripts at "
-        "/forecast-skill/. Run them via the bash tool, e.g.:\n"
-        "  python3 /forecast-skill/scenario_decomposition.py "
-        "--scenarios '[[0.9, 0.05], [0.1, 0.80]]'\n\n"
-        f"{skill_md}"
-    )
+    n = sum(1 for s in scripts_dir.glob("*.py") if not s.name.startswith("__"))
+    print(f"Uploaded SKILL.md + {n} scripts to /forecast-skill/")
 
 
 example_task = tasks[0]
@@ -85,10 +79,17 @@ with environment.session(task=example_task, secrets=secrets) as session:
     # Setup: upload scripts (invisible to the model)
     upload_forecast_skill(session)
 
-    # Build conversation with skill docs in system message
+    # Build conversation — point the agent at the docs file
     prompt = session.get_prompt()
     input_list = [
-        {"role": "system", "content": build_system_message()},
+        {
+            "role": "system",
+            "content": (
+                "Forecast distribution scripts are available at "
+                "/forecast-skill/. Read /forecast-skill/SKILL.md "
+                "with `bash` for usage docs and examples."
+            ),
+        },
         {"role": "user", "content": prompt[0].text},
     ]
     finished = False
