@@ -81,6 +81,55 @@ def _load_run(path: Path) -> dict:
     }
 
 
+def _plot_panel(ax, runs: list[dict], palette: list, cutoff: str | None) -> None:
+    """Plot runs onto a single axes panel."""
+    for i, run in enumerate(runs):
+        c = palette[i % len(palette)]
+        label = (
+            f"{run['strategy']} "
+            f"(brier={run['overall_mean']:.3f}, n={run['n_scored']})"
+        )
+
+        ax.scatter(
+            run["scatter_dates"],
+            run["scatter_briers"],
+            color=c,
+            alpha=0.25,
+            s=12,
+            zorder=2,
+            edgecolors="none",
+        )
+        ax.fill_between(
+            run["agg_dates"],
+            run["mean_brier"] - run["ci_95"],
+            run["mean_brier"] + run["ci_95"],
+            color=c,
+            alpha=0.15,
+            zorder=3,
+        )
+        ax.plot(
+            run["agg_dates"],
+            run["mean_brier"],
+            color=c,
+            linewidth=2,
+            label=label,
+            zorder=4,
+        )
+
+    if cutoff:
+        cd = date.fromisoformat(cutoff)
+        ax.axvline(cd, color="#666666", linestyle="--", linewidth=1.2, zorder=0)
+        ax.text(
+            cd,
+            ax.get_ylim()[1] * 0.95,
+            " Model cutoff ",
+            fontsize=8,
+            color="#666666",
+            ha="right",
+            va="top",
+        )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Plot BrierBench results by question date"
@@ -104,78 +153,58 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    set_theme()
-    fig, ax = plt.subplots()
-    fig.subplots_adjust(top=0.68, bottom=0.14, left=0.08, right=0.72)
+    runs = [_load_run(p) for p in args.files]
 
-    cutoff_date = args.cutoff
+    # Group by model
+    by_model: dict[str, list[dict]] = defaultdict(list)
+    for run in runs:
+        by_model[run["model"]].append(run)
+
+    models = sorted(by_model.keys())
+    n_models = len(models)
     palette = list(colors)
 
-    for i, path in enumerate(args.files):
-        run = _load_run(path)
-        c = palette[i % len(palette)]
-        label = (
-            f"{run['strategy']} "
-            f"(mean={run['overall_mean']:.3f}, n={run['n_scored']})"
+    set_theme()
+
+    if n_models == 1:
+        fig, axes = plt.subplots(1, 1, figsize=(7, 5))
+        axes = [axes]
+        fig.subplots_adjust(top=0.68, bottom=0.14, left=0.08, right=0.62)
+    else:
+        fig, axes = plt.subplots(
+            n_models, 1,
+            figsize=(7, 4 * n_models),
+            sharex=True,
+        )
+        fig.subplots_adjust(
+            top=1 - 0.12 / n_models,
+            bottom=0.08,
+            left=0.08,
+            right=0.62,
+            hspace=0.25,
         )
 
-        ax.scatter(
-            run["scatter_dates"],
-            run["scatter_briers"],
-            color=c,
-            alpha=0.25,
-            s=12,
-            zorder=2,
-            edgecolors="none",
-        )
+    for ax, model in zip(axes, models):
+        model_runs = by_model[model]
+        cutoff = args.cutoff or MODEL_CUTOFFS.get(model)
+        _plot_panel(ax, model_runs, palette, cutoff)
+        label_lines(ax, x_offset=8)
 
-        ax.fill_between(
-            run["agg_dates"],
-            run["mean_brier"] - run["ci_95"],
-            run["mean_brier"] + run["ci_95"],
-            color=c,
-            alpha=0.15,
-            zorder=3,
+        short_model = model.split("/")[-1] if "/" in model else model
+        cutoff_str = f" (cutoff {cutoff})" if cutoff else ""
+        ax.set_title(
+            f"{short_model}{cutoff_str}",
+            fontsize=10, loc="left", pad=8,
         )
-        ax.plot(
-            run["agg_dates"],
-            run["mean_brier"],
-            color=c,
-            linewidth=2,
-            label=label,
-            zorder=4,
-        )
-
-        if cutoff_date is None:
-            cutoff_date = MODEL_CUTOFFS.get(run["model"])
-
-    if cutoff_date:
-        cd = date.fromisoformat(cutoff_date)
-        ax.axvline(
-            cd,
-            color="#666666",
-            linestyle="--",
-            linewidth=1.2,
-            zorder=0,
-        )
-        ax.text(
-            cd,
-            ax.get_ylim()[1] * 0.95,
-            f" Model cutoff ",
-            fontsize=8,
-            color="#666666",
-            ha="right",
-            va="top",
-        )
-
-    label_lines(ax, x_offset=8)
+        ax.set_ylabel("Brier score")
 
     finalize(
-        ax,
+        axes[0],
         title="LLM forecasting accuracy by question date",
         descriptor="BrierBench, Brier score (lower is better), "
         "by question set date",
         source="Source: BrierBench evaluation via OpenReward",
+        y_start=0.075 if n_models > 1 else 0.0,
     )
 
     if args.output:
