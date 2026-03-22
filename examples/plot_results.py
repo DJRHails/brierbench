@@ -26,7 +26,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 sys.path.insert(0, "/Users/dh/.claude/skills/graph-design")
-from graph_design import ci_fill, colors, finalize, label_lines, set_theme
+from graph_design import colors, finalize, label_lines, set_theme
 
 _DATE_PREFIX = re.compile(r"^(\d{4}-\d{2}-\d{2})_")
 
@@ -49,6 +49,8 @@ def _load_run(path: Path) -> dict:
     model = data.get("model", "unknown")
 
     by_date: dict[str, list[float]] = defaultdict(list)
+    all_dates: list[date] = []
+    all_briers: list[float] = []
     for r in data["results"]:
         if r.get("reward") is None:
             continue
@@ -57,24 +59,25 @@ def _load_run(path: Path) -> dict:
             continue
         brier = 1.0 - r["reward"]
         by_date[d].append(brier)
+        all_dates.append(date.fromisoformat(d))
+        all_briers.append(brier)
 
-    dates = sorted(by_date.keys())
-    means = [np.mean(by_date[d]) for d in dates]
-    stderrs = [
-        np.std(by_date[d]) / max(1, np.sqrt(len(by_date[d])))
-        for d in dates
+    agg_dates = sorted(by_date.keys())
+    means = [np.mean(by_date[d]) for d in agg_dates]
+    ci_95 = [
+        1.96 * np.std(by_date[d]) / max(1, np.sqrt(len(by_date[d])))
+        for d in agg_dates
     ]
     return {
         "strategy": strategy,
         "model": model,
-        "dates": [date.fromisoformat(d) for d in dates],
+        "agg_dates": [date.fromisoformat(d) for d in agg_dates],
         "mean_brier": np.array(means),
-        "stderr": np.array(stderrs),
-        "n_per_date": [len(by_date[d]) for d in dates],
-        "overall_mean": np.mean([
-            b for bs in by_date.values() for b in bs
-        ]),
-        "n_scored": sum(len(bs) for bs in by_date.values()),
+        "ci_95": np.array(ci_95),
+        "scatter_dates": all_dates,
+        "scatter_briers": all_briers,
+        "overall_mean": np.mean(all_briers) if all_briers else float("nan"),
+        "n_scored": len(all_briers),
     }
 
 
@@ -103,7 +106,7 @@ def main() -> None:
 
     set_theme()
     fig, ax = plt.subplots()
-    fig.subplots_adjust(top=0.68, bottom=0.14, left=0.06, right=0.78)
+    fig.subplots_adjust(top=0.68, bottom=0.14, left=0.08, right=0.72)
 
     cutoff_date = args.cutoff
     palette = list(colors)
@@ -115,21 +118,32 @@ def main() -> None:
             f"{run['strategy']} "
             f"(mean={run['overall_mean']:.3f}, n={run['n_scored']})"
         )
-        ci_fill(
-            ax,
-            run["dates"],
-            run["mean_brier"] - run["stderr"],
-            run["mean_brier"] + run["stderr"],
+
+        ax.scatter(
+            run["scatter_dates"],
+            run["scatter_briers"],
             color=c,
+            alpha=0.25,
+            s=12,
+            zorder=2,
+            edgecolors="none",
+        )
+
+        ax.fill_between(
+            run["agg_dates"],
+            run["mean_brier"] - run["ci_95"],
+            run["mean_brier"] + run["ci_95"],
+            color=c,
+            alpha=0.15,
+            zorder=3,
         )
         ax.plot(
-            run["dates"],
+            run["agg_dates"],
             run["mean_brier"],
             color=c,
-            marker="o",
-            markersize=3,
-            linewidth=1.5,
+            linewidth=2,
             label=label,
+            zorder=4,
         )
 
         if cutoff_date is None:
