@@ -16,6 +16,7 @@ load_dotenv()
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 FORECAST_SKILL_DIR = _REPO_ROOT / "forecast-skill"
 MODEL_NAME = os.environ.get("MODEL_NAME", "google/gemini-3-flash-preview")
+_MAX_REPEATS = 3
 
 or_client = OpenReward()
 oai_client = OpenAI(
@@ -44,38 +45,41 @@ def get_secrets() -> dict:
     return secrets
 
 
+def _make_tool_output(
+    call_id: str,
+    *,
+    result: str | None = None,
+    error: str | None = None,
+) -> dict:
+    payload = {"error": error} if error else {"result": result}
+    return {
+        "type": "function_call_output",
+        "call_id": call_id,
+        "output": json.dumps(payload),
+    }
+
+
 def upload_forecast_skill(session) -> None:
     """Upload forecast-skill scripts and docs into the sandbox."""
-    session.call_tool("bash", {"command": "mkdir -p /forecast-skill"})
-
-    skill_md = (FORECAST_SKILL_DIR / "SKILL.md").read_text()
-    session.call_tool("bash", {
-        "command": (
-            "cat <<'FORECAST_SKILL_EOF' > /forecast-skill/SKILL.md\n"
-            f"{skill_md}\n"
-            "FORECAST_SKILL_EOF"
-        ),
-    })
-
     scripts_dir = FORECAST_SKILL_DIR / "scripts"
+    files = {
+        "SKILL.md": (FORECAST_SKILL_DIR / "SKILL.md").read_text(),
+    }
     for script in sorted(scripts_dir.glob("*.py")):
         if script.name.startswith("__"):
             continue
-        content = script.read_text()
-        session.call_tool("bash", {
-            "command": (
-                f"cat <<'FORECAST_SKILL_EOF' > "
-                f"/forecast-skill/{script.name}\n"
-                f"{content}\n"
-                f"FORECAST_SKILL_EOF"
-            ),
-        })
+        files[script.name] = script.read_text()
 
-    n = sum(
-        1 for s in scripts_dir.glob("*.py")
-        if not s.name.startswith("__")
-    )
-    print(f"Uploaded SKILL.md + {n} scripts to /forecast-skill/")
+    # Batch all files into a single bash command
+    parts = ["mkdir -p /forecast-skill"]
+    for name, content in files.items():
+        parts.append(
+            f"cat <<'FORECAST_SKILL_EOF' > /forecast-skill/{name}\n"
+            f"{content}\n"
+            f"FORECAST_SKILL_EOF"
+        )
+    session.call_tool("bash", {"command": " && ".join(parts)})
+    print(f"Uploaded {len(files)} files to /forecast-skill/")
 
 
 def run_agent_loop(
@@ -97,7 +101,6 @@ def run_agent_loop(
         prompt = session.get_prompt()
         user_message = prompt[0].text
 
-    # Create rollout for logging
     if rollout_name is None:
         rollout_name = f"{run_name}:{human_id()}"
     rollout = or_client.rollout.create(
@@ -122,7 +125,6 @@ def run_agent_loop(
     n_tool_calls = 0
     last_call_key: str | None = None
     repeat_count = 0
-    max_repeats = 3
 
     while not finished:
         response = oai_client.responses.create(
@@ -131,97 +133,86 @@ def run_agent_loop(
             input=input_list,
         )
         rollout.log_openai_response(response)
-
         input_list += response.output
 
+        had_function_call = False
         for item in response.output:
-            if item.type == "function_call":
-                n_tool_calls += 1
-                call_key = f"{item.name}:{item.arguments}"
-                print(f"[{item.name}] {str(item.arguments)[:120]}")
+            if item.type != "function_call":
+                continue
 
-                # Detect repeated identical tool calls
-                if call_key == last_call_key:
-                    repeat_count += 1
-                    if repeat_count >= max_repeats:
-                        print(
-                            f"  -> Repeated call {repeat_count}x, "
-                            f"forcing advance to resolution"
-                        )
-                        result = session.call_tool(
-                            "advance_time", {"days": 365}
-                        )
-                        text = result.blocks[0].text
-                        print(f"  -> {text[:200]}")
-                        reward = result.reward
-                        finished = result.finished
-                        if reward is not None:
-                            print(
-                                f"  reward={reward:.4f} "
-                                f"finished={finished}"
-                            )
-                        tool_result_item = {
-                            "type": "function_call_output",
-                            "call_id": item.call_id,
-                            "output": json.dumps({"result": text}),
-                        }
-                        input_list.append(tool_result_item)
-                        rollout.log_openai_response(
-                            tool_result_item,
-                            reward=reward,
-                            is_finished=finished,
-                        )
-                        break
-                else:
-                    repeat_count = 0
-                last_call_key = call_key
+            had_function_call = True
+            n_tool_calls += 1
+            call_key = f"{item.name}:{item.arguments}"
+            print(f"[{item.name}] {str(item.arguments)[:120]}")
 
-                try:
-                    tool_result = session.call_tool(
-                        item.name,
-                        json.loads(str(item.arguments)),
-                    )
-                except Exception as e:
-                    error_text = f"Tool error: {e}"
-                    print(f"  -> {error_text[:200]}")
-                    tool_result_item = {
-                        "type": "function_call_output",
-                        "call_id": item.call_id,
-                        "output": json.dumps({"error": error_text}),
-                    }
-                    input_list.append(tool_result_item)
-                    rollout.log_openai_response(tool_result_item)
-                    continue
+            if call_key == last_call_key:
+                repeat_count += 1
+            else:
+                repeat_count = 0
+            last_call_key = call_key
 
-                result_text = tool_result.blocks[0].text
-                print(f"  -> {result_text[:200]}")
-
-                reward = tool_result.reward
-                finished = tool_result.finished
-
+            if repeat_count >= _MAX_REPEATS:
+                print(
+                    f"  -> Repeated {repeat_count}x, "
+                    f"forcing advance to resolution"
+                )
+                result = session.call_tool(
+                    "advance_time", {"days": 365}
+                )
+                tool_out = _make_tool_output(
+                    item.call_id, result=result.blocks[0].text
+                )
+                input_list.append(tool_out)
+                rollout.log_openai_response(
+                    tool_out,
+                    reward=result.reward,
+                    is_finished=result.finished,
+                )
+                reward = result.reward
+                finished = result.finished
+                print(f"  -> {result.blocks[0].text[:200]}")
                 if reward is not None:
                     print(f"  reward={reward:.4f} finished={finished}")
+                break
 
-                tool_result_item = {
-                    "type": "function_call_output",
-                    "call_id": item.call_id,
-                    "output": json.dumps({"result": result_text}),
-                }
-                input_list.append(tool_result_item)
-                rollout.log_openai_response(
-                    tool_result_item,
-                    reward=reward,
-                    is_finished=finished,
+            try:
+                tool_result = session.call_tool(
+                    item.name,
+                    json.loads(str(item.arguments)),
                 )
+            except Exception as e:
+                error_text = f"Tool error: {e}"
+                print(f"  -> {error_text[:200]}")
+                tool_out = _make_tool_output(
+                    item.call_id, error=error_text
+                )
+                input_list.append(tool_out)
+                rollout.log_openai_response(tool_out)
+                continue
 
-                if finished:
-                    break
+            result_text = tool_result.blocks[0].text
+            print(f"  -> {result_text[:200]}")
 
-        # No function calls — re-prompt the model to keep going
-        if not any(
-            getattr(item, "type", None) == "function_call"
-            for item in response.output
-        ):
+            reward = tool_result.reward
+            finished = tool_result.finished
+
+            if reward is not None:
+                print(f"  reward={reward:.4f} finished={finished}")
+
+            tool_out = _make_tool_output(
+                item.call_id, result=result_text
+            )
+            input_list.append(tool_out)
+            rollout.log_openai_response(
+                tool_out,
+                reward=reward,
+                is_finished=finished,
+            )
+
+            if finished:
+                break
+
+        if not had_function_call:
             nudge = {
                 "role": "user",
                 "content": (
