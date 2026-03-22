@@ -141,6 +141,7 @@ async def main() -> None:
     parser.add_argument("--split", default="train")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--output", default=None)
+    parser.add_argument("--run-name", default=None)
     args = parser.parse_args()
 
     env = async_or_client.environments.get(
@@ -151,7 +152,7 @@ async def main() -> None:
     rng = random.Random(args.seed)
     tasks = rng.sample(all_tasks, min(args.n_samples, len(all_tasks)))
 
-    run_name = f"brierbench-{args.strategy}-{args.n_samples}"
+    run_name = args.run_name or f"brierbench-{args.strategy}-{args.n_samples}"
     print(f"Strategy: {args.strategy}")
     print(f"Model: {MODEL_NAME}")
     print(f"Tasks: {len(tasks)} (from {len(all_tasks)} in {args.split})")
