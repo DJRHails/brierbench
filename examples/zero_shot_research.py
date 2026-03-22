@@ -1,6 +1,6 @@
 """BrierBench zero-shot with research: search and update over time.
 
-Like zero_shot.py but encourages the agent to use exa_search for
+Like zero_shot.py but encourages the agent to use web_search for
 evidence gathering, advance_time to simulate passage of time, and
 update predictions as new information becomes available.
 
@@ -36,7 +36,7 @@ Question resolution date: {resolution_date}
 
 ## Instructions
 
-1. RESEARCH first. Use `exa_search` to find current evidence relevant \
+1. RESEARCH first. Use `web_search` to find current evidence relevant \
 to this question. Look for official sources, news reports, prediction \
 market prices, and expert analysis.
 

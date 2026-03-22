@@ -43,7 +43,7 @@ the opposite (lower = better), so the reward is flipped:
 
 | Tool | Description |
 |------|-------------|
-| `exa_search` | Web search via Exa API, restricted to content published on or before the current simulated date |
+| `web_search` | Web search via Exa API, restricted to content published on or before the current simulated date |
 | `bash` | Execute a bash command in a network-isolated sandbox (python3, uv, numpy, pandas, scipy, etc. pre-installed) |
 | `advance_time` | Advance the simulated date by N days (1--365) |
 | `submit_prediction` | Submit or update probability estimate (0--1 exclusive) |
@@ -70,9 +70,9 @@ Multi-turn. Typical task horizons range from days to months. Agents choose how m
 
 Two sources of information leakage can inflate scores:
 
-1. **LLM training cutoffs.** Models trained after question resolution dates may have seen outcomes in their pre-training data. A model with a January 2025 cutoff already "knows" the answer to questions resolving in 2024, regardless of what `exa_search` returns. There is no way to enforce a knowledge cutoff within the environment — this is an inherent limitation of evaluating forecasting with post-hoc models. Results should always be reported alongside the model's training cutoff date.
+1. **LLM training cutoffs.** Models trained after question resolution dates may have seen outcomes in their pre-training data. A model with a January 2025 cutoff already "knows" the answer to questions resolving in 2024, regardless of what `web_search` returns. There is no way to enforce a knowledge cutoff within the environment — this is an inherent limitation of evaluating forecasting with post-hoc models. Results should always be reported alongside the model's training cutoff date.
 
-2. **Exa date filtering is imperfect.** The `end_published_date` parameter filters by *publication date metadata*, which is not always accurate. Pages may be backdated, updated after initial publication without changing the date, or lack publication dates entirely (in which case Exa may fall back to crawl date). This means `exa_search` can occasionally return content containing information from after the simulated date. Treat search results as best-effort, not as a strict information boundary.
+2. **Exa date filtering is imperfect.** The `end_published_date` parameter filters by *publication date metadata*, which is not always accurate. Pages may be backdated, updated after initial publication without changing the date, or lack publication dates entirely (in which case Exa may fall back to crawl date). This means `web_search` can occasionally return content containing information from after the simulated date. Treat search results as best-effort, not as a strict information boundary.
 
 For the most rigorous evaluation, use models with training cutoffs *before* the task start dates, and treat Exa results as supplementary rather than authoritative.
 

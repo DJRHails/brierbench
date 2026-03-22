@@ -34,7 +34,7 @@ Today's Date: {today_date}
 
 Question resolution date: {resolution_date}
 
-Do NOT use exa_search, bash, or any other tool. Do NOT search for \
+Do NOT use web_search, bash, or any other tool. Do NOT search for \
 information. Respond using only your existing knowledge.
 
 Immediately call `submit_prediction` with your probability, then call \
@@ -64,7 +64,7 @@ Today's Date: {today_date}
 
 Question resolution date: {resolution_date}
 
-Do NOT use exa_search, bash, or any other tool. Do NOT search for \
+Do NOT use web_search, bash, or any other tool. Do NOT search for \
 information. Respond using only your existing knowledge.
 
 Immediately call `submit_prediction` with your probability, then call \

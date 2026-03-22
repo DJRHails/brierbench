@@ -247,14 +247,14 @@ class BrierBench(Environment):
             "",
             "## Available Tools",
             "",
-            "- `exa_search`: Search the web for information "
+            "- `web_search`: Search the web for information "
             "(results restricted to content published on or before "
             "the current simulated date).",
             "- `bash`: Execute a bash command in a sandboxed environment "
             "(no network access). Use for computation, running Python "
             "scripts, data analysis, etc.",
             "- `advance_time`: Advance the simulated date by N days. "
-            "New information becomes available via exa_search after "
+            "New information becomes available via web_search after "
             "advancing.",
             "- `submit_prediction`: Submit or update your probability "
             "estimate (0-1 exclusive). You can update at any time. "
@@ -353,7 +353,7 @@ class BrierBench(Environment):
             return False
 
     @tool
-    async def exa_search(self, params: ExaSearchParams) -> ToolOutput:
+    async def web_search(self, params: ExaSearchParams) -> ToolOutput:
         """Search the web via Exa, restricted to the current simulated date."""
         if self._exa is None:
             return ToolOutput(
