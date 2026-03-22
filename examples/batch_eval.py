@@ -1,6 +1,6 @@
 """Batch evaluation runner for BrierBench examples.
 
-Runs N tasks at given concurrency for a specified example strategy.
+Runs N tasks at given concurrency using AsyncOpenReward.
 
 Usage:
     uv run brierbench/examples/batch_eval.py \
@@ -20,10 +20,11 @@ from pathlib import Path
 
 from _common import (
     MODEL_NAME,
-    environment,
+    _BRIERBENCH_URL,
+    async_or_client,
+    async_run_agent_loop,
+    async_upload_forecast_skill,
     get_secrets,
-    run_agent_loop,
-    upload_forecast_skill,
 )
 
 from forecast_skill import build_system_message as forecast_skill_system
@@ -31,34 +32,48 @@ from zero_shot import build_zero_shot_prompt
 from zero_shot_research import build_research_prompt
 
 
-def _run_task(strategy: str, task, run_name: str) -> dict:
-    """Run a single task with the given strategy. Returns result dict."""
+async def _run_task(
+    strategy: str,
+    task,
+    run_name: str,
+    sem: asyncio.Semaphore,
+) -> dict:
+    """Run a single task with the given strategy."""
     spec = task.task_spec
     secrets = get_secrets()
 
-    with environment.session(task=task, secrets=secrets) as session:
-        if strategy == "forecast_skill":
-            upload_forecast_skill(session)
-            result = run_agent_loop(
-                session,
-                run_name=run_name,
-                rollout_name=spec["id"],
-                system_message=forecast_skill_system(),
-            )
-        elif strategy == "zero_shot_research":
-            result = run_agent_loop(
-                session,
-                run_name=run_name,
-                rollout_name=spec["id"],
-                user_message=build_research_prompt(spec),
-            )
-        else:
-            result = run_agent_loop(
-                session,
-                run_name=run_name,
-                rollout_name=spec["id"],
-                user_message=build_zero_shot_prompt(spec),
-            )
+    env = async_or_client.environments.get(
+        name="brierbench",
+        base_url=_BRIERBENCH_URL,
+    )
+
+    async with sem:
+        async with env.session(task=task, secrets=secrets) as session:
+            if strategy == "forecast_skill":
+                await async_upload_forecast_skill(session)
+                result = await async_run_agent_loop(
+                    session,
+                    run_name=run_name,
+                    rollout_name=spec["id"],
+                    system_message=forecast_skill_system(),
+                    quiet=True,
+                )
+            elif strategy == "zero_shot_research":
+                result = await async_run_agent_loop(
+                    session,
+                    run_name=run_name,
+                    rollout_name=spec["id"],
+                    user_message=build_research_prompt(spec),
+                    quiet=True,
+                )
+            else:
+                result = await async_run_agent_loop(
+                    session,
+                    run_name=run_name,
+                    rollout_name=spec["id"],
+                    user_message=build_zero_shot_prompt(spec),
+                    quiet=True,
+                )
 
     return {
         "task_id": spec["id"],
@@ -69,50 +84,50 @@ def _run_task(strategy: str, task, run_name: str) -> dict:
     }
 
 
-def _run_batch(
+async def _run_batch(
     strategy: str,
     tasks: list,
     run_name: str,
     concurrency: int,
 ) -> list[dict]:
-    """Run tasks with process-based concurrency."""
-    from concurrent.futures import ProcessPoolExecutor, as_completed
-
-    results = []
+    """Run tasks concurrently with asyncio semaphore."""
+    sem = asyncio.Semaphore(concurrency)
     t0 = time.time()
+    completed = []
+    total = len(tasks)
 
-    with ProcessPoolExecutor(max_workers=concurrency) as pool:
-        futures = {
-            pool.submit(_run_task, strategy, task, run_name): task
-            for task in tasks
-        }
-        for i, future in enumerate(as_completed(futures), 1):
-            task = futures[future]
-            spec = task.task_spec
-            try:
-                result = future.result()
-                results.append(result)
-                reward = result["reward"]
-                brier = 1 - reward if reward is not None else None
-                elapsed = time.time() - t0
-                print(
-                    f"[{i}/{len(tasks)}] {spec['id'][:60]} "
-                    f"reward={reward} brier={brier} "
-                    f"({elapsed:.0f}s elapsed)"
-                )
-            except Exception as e:
-                print(f"[{i}/{len(tasks)}] {spec['id'][:60]} FAILED: {e}")
-                results.append({
-                    "task_id": spec["id"],
-                    "reward": None,
-                    "finished": False,
-                    "error": str(e),
-                })
+    async def _wrapped(task, idx: int) -> dict:
+        spec = task.task_spec
+        try:
+            result = await _run_task(strategy, task, run_name, sem)
+            reward = result["reward"]
+            brier = 1 - reward if reward is not None else None
+            elapsed = time.time() - t0
+            print(
+                f"[{idx}/{total}] {spec['id'][:60]} "
+                f"reward={reward} brier={brier} "
+                f"({elapsed:.0f}s elapsed)"
+            )
+            return result
+        except Exception as e:
+            elapsed = time.time() - t0
+            print(
+                f"[{idx}/{total}] {spec['id'][:60]} "
+                f"FAILED: {e} ({elapsed:.0f}s)"
+            )
+            return {
+                "task_id": spec["id"],
+                "reward": None,
+                "finished": False,
+                "error": str(e),
+            }
 
-    return results
+    coros = [_wrapped(task, i + 1) for i, task in enumerate(tasks)]
+    completed = await asyncio.gather(*coros)
+    return list(completed)
 
 
-def main() -> None:
+async def main() -> None:
     parser = argparse.ArgumentParser(
         description="Batch BrierBench evaluation"
     )
@@ -125,14 +140,14 @@ def main() -> None:
     parser.add_argument("--concurrency", type=int, default=100)
     parser.add_argument("--split", default="train")
     parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument(
-        "--output",
-        default=None,
-        help="Path to write results JSON",
-    )
+    parser.add_argument("--output", default=None)
     args = parser.parse_args()
 
-    all_tasks = environment.list_tasks(split=args.split)
+    env = async_or_client.environments.get(
+        name="brierbench",
+        base_url=_BRIERBENCH_URL,
+    )
+    all_tasks = await env.list_tasks(split=args.split)
     rng = random.Random(args.seed)
     tasks = rng.sample(all_tasks, min(args.n_samples, len(all_tasks)))
 
@@ -145,12 +160,11 @@ def main() -> None:
     print()
 
     t0 = time.time()
-    results = _run_batch(
+    results = await _run_batch(
         args.strategy, tasks, run_name, args.concurrency
     )
     elapsed = time.time() - t0
 
-    # Summary
     rewards = [r["reward"] for r in results if r.get("reward") is not None]
     briers = [1 - r for r in rewards]
     n_failed = sum(1 for r in results if r.get("reward") is None)
@@ -187,4 +201,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

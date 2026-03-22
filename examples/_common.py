@@ -8,8 +8,8 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 from humane import human_id
-from openai import OpenAI
-from openreward import OpenReward
+from openai import AsyncOpenAI, OpenAI
+from openreward import AsyncOpenReward, OpenReward
 
 load_dotenv()
 
@@ -17,16 +17,24 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 FORECAST_SKILL_DIR = _REPO_ROOT / "forecast-skill"
 MODEL_NAME = os.environ.get("MODEL_NAME", "google/gemini-3-flash-preview")
 _MAX_REPEATS = 3
+_BRIERBENCH_URL = os.environ.get("BRIERBENCH_URL", "http://localhost:8081")
 
+# Sync clients (for single-task examples)
 or_client = OpenReward()
 oai_client = OpenAI(
     base_url="https://openrouter.ai/api/v1",
     api_key=os.environ["OPENROUTER_API_KEY"],
 )
-
 environment = or_client.environments.get(
     name="brierbench",
-    base_url=os.environ.get("BRIERBENCH_URL", "http://localhost:8081"),
+    base_url=_BRIERBENCH_URL,
+)
+
+# Async clients (for batch evaluation)
+async_or_client = AsyncOpenReward()
+async_oai_client = AsyncOpenAI(
+    base_url="https://openrouter.ai/api/v1",
+    api_key=os.environ["OPENROUTER_API_KEY"],
 )
 
 
@@ -81,6 +89,27 @@ def upload_forecast_skill(session) -> None:
     print(f"Uploaded {len(files)} files to /forecast-skill/")
 
 
+async def async_upload_forecast_skill(session) -> None:
+    """Async version of upload_forecast_skill."""
+    scripts_dir = FORECAST_SKILL_DIR / "scripts"
+    files = {
+        "SKILL.md": (FORECAST_SKILL_DIR / "SKILL.md").read_text(),
+    }
+    for script in sorted(scripts_dir.glob("*.py")):
+        if script.name.startswith("__"):
+            continue
+        files[script.name] = script.read_text()
+
+    parts = ["mkdir -p /forecast-skill"]
+    for name, content in files.items():
+        parts.append(
+            f"cat <<'FORECAST_SKILL_EOF' > /forecast-skill/{name}\n"
+            f"{content}\n"
+            f"FORECAST_SKILL_EOF"
+        )
+    await session.call_tool("bash", {"command": " && ".join(parts)})
+
+
 _NUDGE = (
     "You must call `advance_time` to advance to the "
     "resolution date. Submit a prediction first with "
@@ -98,10 +127,7 @@ def run_agent_loop(
     system_message: str | None = None,
     user_message: str | None = None,
 ) -> dict:
-    """Run the agent loop using OpenAI Responses API with rollout logging.
-
-    Returns dict with 'reward', 'finished', 'messages', 'n_tool_calls'.
-    """
+    """Sync agent loop for single-task examples."""
     tools = environment.list_tools(format="openai")
 
     if user_message is None:
@@ -214,6 +240,131 @@ def run_agent_loop(
             rollout.log_openai_response(nudge)
 
     or_client.rollout.close()
+
+    return {
+        "reward": reward,
+        "finished": finished,
+        "messages": input_list,
+        "n_tool_calls": n_tool_calls,
+    }
+
+
+async def async_run_agent_loop(
+    session,
+    *,
+    run_name: str = "brierbench-batch",
+    rollout_name: str | None = None,
+    split: str = "train",
+    system_message: str | None = None,
+    user_message: str | None = None,
+    quiet: bool = False,
+) -> dict:
+    """Async agent loop for batch evaluation."""
+    tools = environment.list_tools(format="openai")
+
+    if user_message is None:
+        user_message = (await session.get_prompt())[0].text
+
+    if rollout_name is None:
+        rollout_name = f"{run_name}:{human_id()}"
+    rollout = async_or_client.rollout.create(
+        run_name=run_name,
+        rollout_name=rollout_name,
+        environment="DJRHails/brierbench",
+        split=split,
+        print_messages=not quiet,
+    )
+
+    input_list: list = []
+    if system_message:
+        input_list.append({
+            "role": "developer",
+            "content": system_message,
+        })
+    input_list.append({"role": "user", "content": user_message})
+    rollout.log_openai_response(input_list[-1])
+
+    finished = False
+    reward = None
+    n_tool_calls = 0
+    last_call_key: str | None = None
+    repeat_count = 0
+
+    def _record(tool_out: dict, tool_result) -> None:
+        nonlocal reward, finished
+        input_list.append(tool_out)
+        rollout.log_openai_response(
+            tool_out,
+            reward=tool_result.reward,
+            is_finished=tool_result.finished,
+        )
+        reward = tool_result.reward
+        finished = tool_result.finished
+
+    while not finished:
+        response = await async_oai_client.responses.create(
+            model=MODEL_NAME,
+            tools=tools,
+            input=input_list,
+        )
+        rollout.log_openai_response(response)
+        input_list += response.output
+
+        had_function_call = False
+        for item in response.output:
+            if item.type != "function_call":
+                continue
+
+            had_function_call = True
+            n_tool_calls += 1
+            call_key = f"{item.name}:{item.arguments}"
+
+            if call_key == last_call_key:
+                repeat_count += 1
+            else:
+                repeat_count = 0
+            last_call_key = call_key
+
+            if repeat_count >= _MAX_REPEATS:
+                result = await session.call_tool(
+                    "advance_time", {"days": 365}
+                )
+                _record(
+                    _make_tool_output(
+                        item.call_id, result=result.blocks[0].text
+                    ),
+                    result,
+                )
+                break
+
+            try:
+                tool_result = await session.call_tool(
+                    item.name,
+                    json.loads(str(item.arguments)),
+                )
+            except Exception as e:
+                tool_out = _make_tool_output(
+                    item.call_id, error=str(e)
+                )
+                input_list.append(tool_out)
+                rollout.log_openai_response(tool_out)
+                continue
+
+            _record(
+                _make_tool_output(
+                    item.call_id, result=tool_result.blocks[0].text
+                ),
+                tool_result,
+            )
+            if finished:
+                break
+
+        if not had_function_call:
+            nudge = {"role": "user", "content": _NUDGE}
+            input_list.append(nudge)
+            rollout.log_openai_response(nudge)
+
+    async_or_client.rollout.close()
 
     return {
         "reward": reward,
