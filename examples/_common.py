@@ -1,14 +1,6 @@
-"""BrierBench quickstart: run a single task with Gemini via OpenRouter.
+"""Shared agent loop and utilities for BrierBench examples."""
 
-Uploads forecast-skill scripts into the sandbox at session start,
-then runs an agent loop that can use them for distribution generation.
-
-Usage:
-    export OPENREWARD_API_KEY='...'
-    export OPENROUTER_API_KEY='...'
-    export EXA_API_KEY='...'
-    uv run brierbench/examples/quickstart.py
-"""
+from __future__ import annotations
 
 import json
 import os
@@ -21,7 +13,7 @@ from openreward import OpenReward
 load_dotenv()
 
 FORECAST_SKILL_DIR = Path("forecast-skill")
-MODEL_NAME = "google/gemini-3-flash-preview"
+MODEL_NAME = os.environ.get("MODEL_NAME", "google/gemini-3-flash-preview")
 
 or_client = OpenReward()
 oai_client = OpenAI(
@@ -31,21 +23,23 @@ oai_client = OpenAI(
 
 environment = or_client.environments.get(
     name="brierbench",
-    base_url="http://localhost:8081",
+    base_url=os.environ.get("BRIERBENCH_URL", "http://localhost:8081"),
 )
-tasks = environment.get_task_range(split="train", start=0, stop=1)
-tools = environment.list_tools(format="openrouter")
 
-secrets = {
-    "EXA_API_KEY": (os.environ["EXA_API_KEY"], ["api.exa.ai"]),
-}
+
+def get_secrets() -> dict:
+    """Build secrets dict from environment variables."""
+    secrets = {}
+    exa_key = os.environ.get("EXA_API_KEY")
+    if exa_key:
+        secrets["EXA_API_KEY"] = (exa_key, ["api.exa.ai"])
+    return secrets
 
 
 def upload_forecast_skill(session) -> None:
-    """Upload forecast-skill scripts and docs into the sandbox via bash."""
+    """Upload forecast-skill scripts and docs into the sandbox."""
     session.call_tool("bash", {"command": "mkdir -p /forecast-skill"})
 
-    # Upload SKILL.md (docs the agent can read via bash)
     skill_md = (FORECAST_SKILL_DIR / "SKILL.md").read_text()
     session.call_tool("bash", {
         "command": (
@@ -55,7 +49,6 @@ def upload_forecast_skill(session) -> None:
         ),
     })
 
-    # Upload scripts
     scripts_dir = FORECAST_SKILL_DIR / "scripts"
     for script in sorted(scripts_dir.glob("*.py")):
         if script.name.startswith("__"):
@@ -70,31 +63,37 @@ def upload_forecast_skill(session) -> None:
             ),
         })
 
-    n = sum(1 for s in scripts_dir.glob("*.py") if not s.name.startswith("__"))
+    n = sum(
+        1 for s in scripts_dir.glob("*.py")
+        if not s.name.startswith("__")
+    )
     print(f"Uploaded SKILL.md + {n} scripts to /forecast-skill/")
 
 
-def build_system_message() -> str:
-    """System message pointing the agent at the forecast-skill docs."""
-    return (
-        "Forecast distribution scripts are available at "
-        "/forecast-skill/. Read /forecast-skill/SKILL.md "
-        "with `bash` for usage docs and examples."
-    )
+def run_agent_loop(
+    session,
+    *,
+    system_message: str | None = None,
+    user_message: str | None = None,
+) -> dict:
+    """Run the OpenRouter agent loop until finished or no tool calls.
 
+    Returns dict with 'reward', 'finished', 'messages', 'n_tool_calls'.
+    """
+    tools = environment.list_tools(format="openrouter")
 
-example_task = tasks[0]
-with environment.session(task=example_task, secrets=secrets) as session:
-    # Setup: upload scripts (invisible to the model)
-    upload_forecast_skill(session)
+    if user_message is None:
+        prompt = session.get_prompt()
+        user_message = prompt[0].text
 
-    # Build conversation — point the agent at the docs file
-    prompt = session.get_prompt()
-    input_list = [
-        {"role": "system", "content": build_system_message()},
-        {"role": "user", "content": prompt[0].text},
-    ]
+    input_list: list[dict] = []
+    if system_message:
+        input_list.append({"role": "system", "content": system_message})
+    input_list.append({"role": "user", "content": user_message})
+
     finished = False
+    reward = None
+    n_tool_calls = 0
 
     while not finished:
         response = oai_client.chat.completions.create(
@@ -117,32 +116,37 @@ with environment.session(task=example_task, secrets=secrets) as session:
         for tool_call in tool_calls:
             tool_name = tool_call.function.name
             tool_args = json.loads(tool_call.function.arguments)
+            n_tool_calls += 1
 
             print(f"[{tool_name}] {json.dumps(tool_args)[:120]}")
 
             tool_result = session.call_tool(tool_name, tool_args)
-
-            reward = tool_result.reward
-            finished = tool_result.finished
-
             result_text = tool_result.blocks[0].text
             print(f"  -> {result_text[:200]}")
-            if reward is not None:
-                print(f"  reward={reward:.4f} finished={finished}")
 
-            tool_result_message = {
+            if tool_result.reward is not None:
+                reward = tool_result.reward
+                print(f"  reward={reward:.4f} finished={tool_result.finished}")
+
+            finished = tool_result.finished
+
+            input_list.append({
                 "role": "tool",
                 "tool_call_id": tool_call.id,
                 "content": json.dumps({"result": result_text}),
-            }
-            input_list.append(tool_result_message)
+            })
 
             if finished:
                 break
 
-    # Print final assistant message if it has text content
+    # Print final text if the model gave one
     last = input_list[-1]
     if last.get("role") == "assistant" and last.get("content"):
         print(f"\n[assistant] {last['content'][:500]}")
 
-    print(f"\nTotal messages: {len(input_list)}")
+    return {
+        "reward": reward,
+        "finished": finished,
+        "messages": input_list,
+        "n_tool_calls": n_tool_calls,
+    }
