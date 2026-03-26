@@ -7,7 +7,7 @@ Usage:
     uv run brierbench/examples/summarise_results.py \
         /tmp/brierbench-results/zero_shot_hosted.json \
         /tmp/brierbench-results/zero_shot_research_hosted.json \
-        /tmp/brierbench-results/forecast_skill_hosted.json
+        /tmp/brierbench-results/zero_shot_hosted.json
 """
 
 from __future__ import annotations

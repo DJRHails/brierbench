@@ -11,10 +11,9 @@ prepare_tasks.py   # Generate train/test from ForecastBench data
 Dockerfile         # Environment server image (deployed via OpenReward)
 sandbox.Dockerfile # Sandbox image (djrhails/brierbench-sandbox:latest)
 examples/
-  _common.py           # Shared: clients, agent loop, upload helpers
+  _common.py           # Shared: clients, agent loop
   zero_shot.py         # No search, immediate predict + advance
   zero_shot_research.py # Search + advance + update loop
-  forecast_skill.py    # Structured methodology with distribution scripts
   batch_eval.py        # Concurrent evaluation runner
   plot_results.py      # Brier score by question date (graph-design)
   summarise_results.py # Raw Brier breakdown by source/cutoff
@@ -69,7 +68,7 @@ cd examples && uv run python batch_eval.py \
     --output /tmp/results.json
 ```
 
-Strategies: `zero_shot`, `zero_shot_research`, `forecast_skill`
+Strategies: `zero_shot`, `zero_shot_research`
 
 ### Scoring
 
@@ -106,5 +105,4 @@ secrets = {
 
 ## Key files outside this repo
 
-- `forecast-skill/` submodule: distribution scripts uploaded to sandbox at eval time
 - `.env`: API keys (OPENREWARD_API_KEY, OPENROUTER_API_KEY, EXA_API_KEY)

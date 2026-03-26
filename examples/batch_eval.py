@@ -24,11 +24,9 @@ from _common import (
     _BRIERBENCH_URL,
     async_or_client,
     async_run_agent_loop,
-    async_upload_forecast_skill,
     get_secrets,
 )
 
-from forecast_skill import build_system_message as forecast_skill_system
 from zero_shot import build_zero_shot_prompt
 from zero_shot_research import build_research_prompt
 
@@ -50,16 +48,7 @@ async def _run_task(
 
     async with sem:
         async with env.session(task=task, secrets=secrets) as session:
-            if strategy == "forecast_skill":
-                await async_upload_forecast_skill(session)
-                result = await async_run_agent_loop(
-                    session,
-                    run_name=run_name,
-                    rollout_name=spec["id"],
-                    system_message=forecast_skill_system(),
-                    quiet=True,
-                )
-            elif strategy == "zero_shot_research":
+            if strategy == "zero_shot_research":
                 result = await async_run_agent_loop(
                     session,
                     run_name=run_name,
@@ -134,7 +123,7 @@ async def main() -> None:
     )
     parser.add_argument(
         "--strategy",
-        choices=["zero_shot", "zero_shot_research", "forecast_skill"],
+        choices=["zero_shot", "zero_shot_research"],
         required=True,
     )
     parser.add_argument("--n-samples", type=int, default=100)

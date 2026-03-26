@@ -8,7 +8,7 @@ Also loads processed forecast sets to compare against published models.
 Usage:
     uv run brierbench/examples/brier_index.py \
         /tmp/brierbench-results/zero_shot_hosted.json \
-        /tmp/brierbench-results/forecast_skill_hosted.json
+        /tmp/brierbench-results/zero_shot_hosted.json
 
     # With pre-downloaded data:
     uv run brierbench/examples/brier_index.py \

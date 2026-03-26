@@ -246,7 +246,7 @@ def main() -> None:
     if args.output:
         out = Path(args.output)
         out.parent.mkdir(parents=True, exist_ok=True)
-        fig.savefig(out, dpi=150)
+        fig.savefig(out, dpi=150, transparent=True)
         print(f"Saved to {out}")
     else:
         plt.show()

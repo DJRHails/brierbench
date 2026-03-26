@@ -13,8 +13,6 @@ from openreward import AsyncOpenReward, OpenReward
 
 load_dotenv()
 
-_REPO_ROOT = Path(__file__).resolve().parent.parent.parent
-FORECAST_SKILL_DIR = _REPO_ROOT / "forecast-skill"
 MODEL_NAME = os.environ.get("MODEL_NAME", "google/gemini-3-flash-preview")
 _MAX_REPEATS = 3
 _BRIERBENCH_URL = os.environ.get("BRIERBENCH_URL") or None
@@ -66,55 +64,6 @@ def _make_tool_output(
         "call_id": call_id,
         "output": json.dumps(payload),
     }
-
-
-def upload_forecast_skill(session) -> None:
-    """Upload forecast-skill scripts and docs into the sandbox."""
-    scripts_dir = FORECAST_SKILL_DIR / "scripts"
-    files = {
-        "SKILL.md": (FORECAST_SKILL_DIR / "SKILL.md").read_text(),
-    }
-    for script in sorted(scripts_dir.glob("*.py")):
-        if script.name.startswith("__"):
-            continue
-        files[script.name] = script.read_text()
-
-    session.call_tool("bash", {"command": "mkdir -p /forecast-skill/scripts"})
-    for name, content in files.items():
-        dest = f"/forecast-skill/scripts/{name}"
-        if name == "SKILL.md":
-            dest = f"/forecast-skill/{name}"
-        cmd = (
-            f"cat <<'FORECAST_SKILL_EOF' > {dest}\n"
-            f"{content}\n"
-            f"FORECAST_SKILL_EOF"
-        )
-        session.call_tool("bash", {"command": cmd})
-    print(f"Uploaded {len(files)} files to /forecast-skill/")
-
-
-async def async_upload_forecast_skill(session) -> None:
-    """Async version of upload_forecast_skill."""
-    scripts_dir = FORECAST_SKILL_DIR / "scripts"
-    files = {
-        "SKILL.md": (FORECAST_SKILL_DIR / "SKILL.md").read_text(),
-    }
-    for script in sorted(scripts_dir.glob("*.py")):
-        if script.name.startswith("__"):
-            continue
-        files[script.name] = script.read_text()
-
-    await session.call_tool("bash", {"command": "mkdir -p /forecast-skill/scripts"})
-    for name, content in files.items():
-        dest = f"/forecast-skill/scripts/{name}"
-        if name == "SKILL.md":
-            dest = f"/forecast-skill/{name}"
-        cmd = (
-            f"cat <<'FORECAST_SKILL_EOF' > {dest}\n"
-            f"{content}\n"
-            f"FORECAST_SKILL_EOF"
-        )
-        await session.call_tool("bash", {"command": cmd})
 
 
 _NUDGE = (
